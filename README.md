@@ -22,7 +22,34 @@ lean --version
 
 ### Abbreviation
 
-- Abbreviation (unicode character) insertion is supported by [snippets](https://github.com/owlx56/zed-lean4/blob/main/snippets/lean%204.json).
+- Abbreviations turn into symbols as you type: `\R` and a space gives `ℝ`, `\alpha` gives `α` right away. Turn off with `"abbreviations": false`.
+- The same abbreviations are also [snippets](https://github.com/owlx56/zed-lean4/blob/main/snippets/lean%204.json). Use the snippet for brackets like `\<>` if you want the cursor inside.
+
+### Infoview
+
+Zed extensions can't add panels, so the infoview is a Markdown file shown in Zed's Markdown preview.
+
+- The extension runs the Lean server through `lean-infoview-proxy`, a small Rust binary downloaded from GitHub releases. It follows the cursor and writes goals to `.lake/infoview.md` in the project.
+- The file opens when you open a Lean file. It shows the goals, the expected type, messages at the cursor and all messages of the file. Lines changed by the tactic under the cursor are marked with `-- ✱`.
+- Hover in a tactic block also shows the goals.
+- Zed can't open it in a split by itself. Move it to the right once and Zed keeps the layout.
+
+Recommended Zed settings (better in the Lean project's `.zed/settings.json`, since they apply to all Markdown files):
+
+```json
+{ "markdown_preview": { "open_markdown_files_in_preview": true, "limit_content_width": false } }
+```
+
+Settings in `lsp.lean4-lsp.settings`:
+
+| Setting | Default | |
+|---|---|---|
+| `infoview` | `true` | `false` runs `lake serve` without the proxy |
+| `infoview_file` | `.lake/infoview.md` | where to write the infoview |
+| `infoview_auto_open` | `true` | open the infoview with the first Lean file |
+| `infoview_hover` | `true` | show goals in hover |
+| `abbreviations` | `true` | replace abbreviations as you type |
+| `infoview_proxy_path` | | use a local build of the proxy (`cargo build -p lean-infoview-proxy --release`) |
 
 ### Nested Lean project
 
@@ -58,7 +85,6 @@ lean --version
 
 ## TODO list
 
-- Implement infoview like [VSCode](https://github.com/leanprover/vscode-lean4) and [Neovim](https://github.com/Julian/lean.nvim) with Rust
 - Tree-sitter-lean is experimental now and needs improvement
 - Update and uninstall _elan_
 
