@@ -35,7 +35,7 @@ Zed extensions can't add panels, so the infoview is a Markdown file shown in Zed
 - Hover in a tactic block also shows the goals.
 - Zed can't open it in a split by itself. Move it to the right once and Zed keeps the layout.
 
-Recommended Zed settings (better in the Lean project's `.zed/settings.json`, since they apply to all Markdown files):
+Recommended settings for the user `settings.json` (Zed doesn't allow them in project settings, so they apply to all Markdown files):
 
 ```json
 { "markdown_preview": { "open_markdown_files_in_preview": true, "limit_content_width": false } }
