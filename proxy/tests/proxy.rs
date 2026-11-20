@@ -200,3 +200,29 @@ fn expands_abbreviation_with_apply_edit() {
     assert_eq!(change["edits"][0]["range"]["end"]["character"], 6);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn opens_infoview_once_per_project() {
+    let dir = temp_dir("open-once");
+    let goals_file = dir.join(".lake/infoview.md");
+    let open = |proxy: &mut Proxy| {
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                   "params": {"capabilities": {"window": {"showDocument": {"support": true}}}}}),
+            json!({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+                   "params": {"textDocument": {"uri": "file:///tmp/C.lean", "languageId": "lean4",
+                                               "version": 1, "text": ""}}}),
+        ]);
+        let is_show = |m: &Value| m["method"] == "window/showDocument";
+        // showDocument, if sent, follows the initialize response within moments.
+        let received = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 1));
+        let extra = proxy.output.recv_timeout(Duration::from_millis(300)).ok();
+        received.iter().chain(&extra).any(is_show)
+    };
+
+    assert!(open(&mut Proxy::start(Config::new(goals_file.clone()))));
+    assert!(dir.join(".lake/infoview.opened").exists());
+    // Zed restores the open preview with the layout; do not open a second one.
+    assert!(!open(&mut Proxy::start(Config::new(goals_file))));
+    let _ = std::fs::remove_dir_all(&dir);
+}

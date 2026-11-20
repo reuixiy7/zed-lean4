@@ -30,7 +30,8 @@ lean --version
 Zed extensions can't add panels, so the infoview is a Markdown file shown in Zed's Markdown preview.
 
 - The extension runs the Lean server through `lean-infoview-proxy`, a small Rust binary downloaded from GitHub releases. It follows the cursor and writes goals to `.lake/infoview.md` in the project.
-- The file opens when you open a Lean file. It shows the goals, the expected type, messages at the cursor and all messages of the file. Lines changed by the tactic under the cursor are marked with `-- ✱`.
+- It shows the goals, the expected type, messages at the cursor and all messages of the file. Lines changed by the tactic under the cursor are marked with `-- ✱`.
+- The infoview opens by itself the first time you open a Lean file in a project. After that Zed restores it with the rest of the layout. If you closed it, open `.lake/infoview.md` yourself.
 - Hover in a tactic block also shows the goals.
 - Zed can't open it in a split by itself. Move it to the right once and Zed keeps the layout.
 
@@ -46,7 +47,7 @@ Settings in `lsp.lean4-lsp.settings`:
 |---|---|---|
 | `infoview` | `true` | `false` runs `lake serve` without the proxy |
 | `infoview_file` | `.lake/infoview.md` | where to write the infoview |
-| `infoview_auto_open` | `true` | open the infoview with the first Lean file |
+| `infoview_auto_open` | `true` | open the infoview the first time in a project |
 | `infoview_hover` | `true` | show goals in hover |
 | `abbreviations` | `true` | replace abbreviations as you type |
 | `infoview_proxy_path` | | use a local build of the proxy (`cargo build -p lean-infoview-proxy --release`) |

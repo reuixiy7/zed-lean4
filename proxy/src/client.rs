@@ -10,6 +10,7 @@ use crate::shared::{Event, Shared, log};
 use crate::{framing, hover, uri};
 use serde_json::{Value, json};
 use std::io::{self, BufReader, Read};
+use std::path::PathBuf;
 
 /// State only this direction uses.
 struct Input {
@@ -52,11 +53,7 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
             "textDocument/didOpen" => {
                 input.documents.open(params);
                 if std::mem::take(&mut input.show_infoview) {
-                    let uri = uri::from_path(&shared.config.goals_file);
-                    shared.request_client(
-                        "window/showDocument",
-                        json!({"uri": uri, "takeFocus": false}),
-                    );
+                    show_infoview(shared);
                 }
             }
             "textDocument/didChange" => {
@@ -113,11 +110,31 @@ fn on_initialize(shared: &Shared, input: &mut Input, params: &Value) {
             log("client does not support workspace/applyEdit; abbreviations are disabled");
         }
     }
-    if shared.config.auto_open {
+    if shared.config.auto_open && !opened_marker(shared).exists() {
         input.show_infoview = capability("/window/showDocument/support");
         if !input.show_infoview {
             log("client does not support window/showDocument; open the infoview file manually");
         }
+    }
+}
+
+/// Marks that the infoview was opened in this project once. Zed restores open
+/// files and previews with the layout, so opening it again would add a duplicate.
+fn opened_marker(shared: &Shared) -> PathBuf {
+    shared.config.goals_file.with_extension("opened")
+}
+
+fn show_infoview(shared: &Shared) {
+    let uri = uri::from_path(&shared.config.goals_file);
+    shared.request_client(
+        "window/showDocument",
+        json!({"uri": uri, "takeFocus": false}),
+    );
+    if let Err(e) = std::fs::write(opened_marker(shared), "") {
+        log(&format!(
+            "cannot write {}: {e}",
+            opened_marker(shared).display()
+        ));
     }
 }
 
