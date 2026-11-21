@@ -1,0 +1,10 @@
+[package]
+name = "lean-infoview-proxy"
+version = "0.4.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "LSP proxy between Zed and the Lean server that renders an infoview"
+
+[dependencies]
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
