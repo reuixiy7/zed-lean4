@@ -7,6 +7,7 @@ use crate::framing;
 use crate::hover::{self, HoverWait};
 use crate::lsp::{Diagnostic, text_document_uri};
 use crate::shared::{Event, Pending, Shared};
+use crate::status;
 use serde_json::Value;
 use std::io::{self, BufReader, Read};
 
@@ -35,14 +36,41 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
             continue;
         }
 
-        shared.write_client(msg.raw());
         match msg.method() {
-            Some("textDocument/publishDiagnostics") => on_diagnostics(shared, msg.value()),
-            Some("$/lean/fileProgress") => on_file_progress(shared, &msg.value()),
-            _ => {}
+            Some("textDocument/publishDiagnostics") => {
+                let value = msg.value();
+                if shared.config.status {
+                    shared.send_client(&decorated(shared, value.clone()));
+                } else {
+                    shared.write_client(msg.raw());
+                }
+                on_diagnostics(shared, value);
+            }
+            Some("$/lean/fileProgress") => {
+                shared.write_client(msg.raw());
+                on_file_progress(shared, &msg.value());
+            }
+            _ => shared.write_client(msg.raw()),
         }
     }
     Ok(())
+}
+
+/// The diagnostics as Zed shows them, with the declaration status.
+fn decorated(shared: &Shared, mut msg: Value) -> Value {
+    let uri = msg
+        .pointer("/params/uri")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let state = shared.state();
+    let version = msg.pointer("/params/version").and_then(Value::as_i64);
+    // Names are looked up only in the text the diagnostics are for.
+    let text = uri
+        .and_then(|uri| state.documents.get(&uri))
+        .filter(|doc| version.is_none_or(|v| v == doc.version))
+        .map(|doc| doc.text.as_str());
+    status::decorate(&mut msg["params"], text);
+    msg
 }
 
 fn on_diagnostics(shared: &Shared, mut msg: Value) {

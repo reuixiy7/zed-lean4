@@ -1,6 +1,7 @@
 //! What the proxy threads share: the two output streams, the router for the
 //! proxy's own requests, and the channels to the goals worker and hover timer.
 
+use crate::document::Documents;
 use crate::framing;
 use crate::hover::HoverWait;
 use crate::lsp::{self, Cursor, Diagnostic, RequestId};
@@ -60,6 +61,8 @@ pub struct State {
     pub client_pending: HashSet<RequestId>,
     /// Client hover requests whose response is merged with a goal.
     pub hovers: HashMap<RequestId, HoverWait>,
+    /// Mirrors of the open documents.
+    pub documents: Documents,
 }
 
 type Out = Mutex<Box<dyn Write + Send>>;

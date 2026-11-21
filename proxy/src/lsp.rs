@@ -66,6 +66,18 @@ impl Cursor {
     }
 }
 
+/// `leanTags` value of the silent message Lean logs for a proved theorem.
+pub const LEAN_TAG_GOALS_ACCOMPLISHED: u64 = 2;
+
+/// The `leanTags` of a diagnostic.
+pub fn lean_tags(d: &serde_json::Map<String, Value>) -> impl Iterator<Item = u64> + '_ {
+    d.get("leanTags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_u64)
+}
+
 /// The part of a diagnostic the infoview shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -73,6 +85,10 @@ pub struct Diagnostic {
     pub start: Position,
     pub end_line: u64,
     pub message: String,
+    /// Not shown as a regular diagnostic (`isSilent`); only at the cursor.
+    pub silent: bool,
+    /// Lean's "Goals accomplished!" for a proved theorem.
+    pub accomplished: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -93,6 +109,10 @@ impl Diagnostic {
             Some(4) => Severity::Hint,
             _ => Severity::Information,
         };
+        let silent = value.get("isSilent").and_then(Value::as_bool) == Some(true);
+        let accomplished = value
+            .as_object()
+            .is_some_and(|d| lean_tags(d).any(|t| t == LEAN_TAG_GOALS_ACCOMPLISHED));
         let message = match value.get_mut("message")?.take() {
             Value::String(message) => message,
             _ => return None,
@@ -102,6 +122,8 @@ impl Diagnostic {
             start,
             end_line,
             message,
+            silent,
+            accomplished,
         })
     }
 

@@ -9,10 +9,11 @@ const PROXY_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 const DEFAULT_INFOVIEW_FILE: &str = ".lake/infoview.md";
 
 /// Proxy flags turned on by setting these to `false`.
-const PROXY_FLAGS: [(&str, &str); 3] = [
+const PROXY_FLAGS: [(&str, &str); 4] = [
     ("infoview_hover", "--no-hover"),
     ("infoview_auto_open", "--no-auto-open"),
     ("abbreviations", "--no-abbreviations"),
+    ("declaration_status", "--no-status"),
 ];
 
 fn setting<'a>(settings: Option<&'a Value>, key: &str) -> Option<&'a Value> {

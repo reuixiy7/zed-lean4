@@ -28,11 +28,21 @@ fn fake_server(input: impl Read + Send + 'static, mut output: PipeWriter) {
     let requests = messages(input);
     thread::spawn(move || {
         for msg in requests {
+            if msg["method"] == "textDocument/didOpen" {
+                let params = &msg["params"]["textDocument"];
+                let proved = json!({"range": {"start": {"line": 0, "character": 0}, "end": {"line": 1, "character": 0}},
+                    "severity": 3, "isSilent": true, "leanTags": [2], "message": "Goals accomplished!"});
+                let diagnostics = json!({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics",
+                    "params": {"uri": params["uri"], "version": params["version"], "diagnostics": [proved]}});
+                framing::write_message(&mut output, &diagnostics).unwrap();
+            }
             let Some(id) = msg.get("id").cloned() else {
                 continue;
             };
             let result = match msg["method"].as_str() {
-                Some("initialize") => json!({"capabilities": {"hoverProvider": true}}),
+                // Echoes the capability the proxy adds, so tests can see it arrived.
+                Some("initialize") => json!({"capabilities": {"hoverProvider": true},
+                    "silent": msg.pointer("/params/capabilities/lean/silentDiagnosticSupport")}),
                 Some("$/lean/plainGoal") => json!({"goals": ["x : Nat\n⊢ x = x"], "rendered": ""}),
                 Some("$/lean/plainTermGoal") => json!({"goal": "x = x", "range": {}}),
                 Some("textDocument/hover") => {
@@ -120,7 +130,9 @@ fn proxies_tracks_cursor_and_writes_goals() {
         json!({"jsonrpc": "2.0", "id": 3, "method": "textDocument/hover",
                "params": {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 2}}}),
     ]);
-    let received = proxy.receive_until(|r| r.len() >= 4);
+    let received = proxy.receive_until(|r| {
+        r.iter().any(|m| m["id"] == 3) && r.iter().any(|m| m["method"] == "window/showDocument")
+    });
 
     let show = received
         .iter()
@@ -224,5 +236,43 @@ fn opens_infoview_once_per_project() {
     assert!(dir.join(".lake/infoview.opened").exists());
     // Zed restores the open preview with the layout; do not open a second one.
     assert!(!open(&mut Proxy::start(Config::new(goals_file))));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn marks_proved_theorems() {
+    let dir = temp_dir("status");
+    let mut config = Config::new(dir.join(".lake/infoview.md"));
+    config.auto_open = false;
+    let goals_file = config.goals_file.clone();
+    let mut proxy = Proxy::start(config);
+
+    let uri = "file:///tmp/C.lean";
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}),
+        json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "lean4", "version": 1,
+            "text": "theorem two : 1 + 1 = 2 := rfl\n"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "textDocument/documentHighlight",
+               "params": {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 2}}}),
+    ]);
+    let is_diagnostics = |m: &Value| m["method"] == "textDocument/publishDiagnostics";
+    let received = proxy.receive_until(|r| r.iter().any(is_diagnostics));
+
+    let init = received
+        .iter()
+        .find(|m| m["id"] == 1)
+        .expect("initialize response");
+    assert_eq!(init["result"]["silent"], true, "silent support announced");
+
+    let d = &received.iter().find(|m| is_diagnostics(m)).unwrap()["params"]["diagnostics"][0];
+    assert_eq!(d["message"], "✅ Goals accomplished");
+    assert_eq!(d["severity"], 4);
+    assert_eq!(d["range"]["start"], json!({"line": 0, "character": 8}));
+    assert_eq!(d["range"]["end"], json!({"line": 0, "character": 11}));
+
+    let text = wait_for_file(&goals_file, |t| t.contains("✅ `1:1`"));
+    assert!(text.contains("✅ 1"), "{text}");
+    assert!(!text.contains("All messages"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }

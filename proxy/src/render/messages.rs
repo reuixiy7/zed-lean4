@@ -8,7 +8,16 @@ const MAX_ROWS: usize = 50;
 /// Characters of a message shown in an "All messages" row.
 const MAX_ROW_CHARS: usize = 100;
 
-fn icon(severity: Severity) -> &'static str {
+const PROVED: &str = "✅";
+
+fn icon(d: &Diagnostic) -> &'static str {
+    if d.accomplished {
+        return PROVED;
+    }
+    severity_icon(d.severity)
+}
+
+fn severity_icon(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "❌",
         Severity::Warning => "⚠️",
@@ -17,21 +26,27 @@ fn icon(severity: Severity) -> &'static str {
     }
 }
 
-/// `❌ 2`, `⚠️ 1` for the status line.
+/// `❌ 2`, `⚠️ 1`, `✅ 5` (proved theorems) for the status line.
 pub fn counts(diagnostics: &[Diagnostic]) -> Vec<String> {
-    let (mut errors, mut warnings) = (0, 0);
+    let (mut errors, mut warnings, mut proved) = (0, 0, 0);
     for d in diagnostics {
         match d.severity {
+            _ if d.accomplished => proved += 1,
+            _ if d.silent => {}
             Severity::Error => errors += 1,
             Severity::Warning => warnings += 1,
             _ => {}
         }
     }
-    [(Severity::Error, errors), (Severity::Warning, warnings)]
-        .into_iter()
-        .filter(|&(_, n)| n > 0)
-        .map(|(severity, n)| format!("{} {n}", icon(severity)))
-        .collect()
+    [
+        (severity_icon(Severity::Error), errors),
+        (severity_icon(Severity::Warning), warnings),
+        (PROVED, proved),
+    ]
+    .into_iter()
+    .filter(|&(_, n)| n > 0)
+    .map(|(icon, n)| format!("{icon} {n}"))
+    .collect()
 }
 
 /// Appends the messages covering the cursor line; returns whether there were any.
@@ -45,7 +60,7 @@ pub fn at_cursor(out: &mut String, diagnostics: &[Diagnostic], line: u64) -> boo
         let start = d.start;
         out.push_str(&format!(
             "{} `{}:{}`\n\n",
-            icon(d.severity),
+            icon(d),
             start.line + 1,
             start.character + 1
         ));
@@ -54,12 +69,12 @@ pub fn at_cursor(out: &mut String, diagnostics: &[Diagnostic], line: u64) -> boo
     any
 }
 
-/// Appends a table of all messages of the file.
+/// Appends a table of all messages of the file, except silent ones.
 pub fn all(out: &mut String, diagnostics: &[Diagnostic]) {
-    if diagnostics.is_empty() {
+    let mut sorted: Vec<&Diagnostic> = diagnostics.iter().filter(|d| !d.silent).collect();
+    if sorted.is_empty() {
         return;
     }
-    let mut sorted: Vec<&Diagnostic> = diagnostics.iter().collect();
     sorted.sort_by_key(|d| (d.start.line, d.start.character, d.severity));
 
     out.push_str(&format!("---\n\n## All messages ({})\n\n", sorted.len()));
@@ -67,7 +82,7 @@ pub fn all(out: &mut String, diagnostics: &[Diagnostic]) {
     for d in sorted.iter().take(MAX_ROWS) {
         out.push_str(&format!(
             "| {} | {} | {} |\n",
-            icon(d.severity),
+            icon(d),
             d.start.line + 1,
             table_cell(&d.message)
         ));
@@ -114,6 +129,35 @@ mod tests {
         ];
         assert_eq!(counts(&d), ["❌ 1", "⚠️ 2"]);
         assert!(counts(&[]).is_empty());
+    }
+
+    fn proved(line: u64) -> Diagnostic {
+        Diagnostic::from_json(&mut json!({"severity": 3, "message": "Goals accomplished!",
+            "isSilent": true, "leanTags": [2],
+            "range": {"start": {"line": line, "character": 0}, "end": {"line": line + 1, "character": 0}}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn proved_theorems_are_counted_and_shown_only_at_cursor() {
+        let d = [
+            proved(0),
+            proved(3),
+            diag(2, 5, 5, "declaration uses 'sorry'"),
+        ];
+        assert_eq!(counts(&d), ["⚠️ 1", "✅ 2"]);
+
+        let mut out = String::new();
+        assert!(at_cursor(&mut out, &d, 0));
+        assert!(out.contains("✅ `1:1`"), "{out}");
+
+        let mut out = String::new();
+        all(&mut out, &d);
+        assert!(out.contains("## All messages (1)"), "{out}");
+        assert!(!out.contains("Goals accomplished"), "{out}");
+        let mut out = String::new();
+        all(&mut out, &d[..2]);
+        assert!(out.is_empty(), "{out}");
     }
 
     #[test]

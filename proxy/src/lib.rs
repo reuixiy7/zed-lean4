@@ -8,7 +8,8 @@
 //!   a Markdown file meant to be shown in Zed's Markdown preview;
 //! - optionally appends the tactic state to hover responses;
 //! - optionally asks Zed to open the infoview file via `window/showDocument`;
-//! - expands Unicode abbreviations (`\R` → `ℝ`) as you type via `workspace/applyEdit`.
+//! - expands Unicode abbreviations (`\R` → `ℝ`) as you type via `workspace/applyEdit`;
+//! - optionally marks declarations as proved (✅), using `sorry` (⚠️) or failing (❌).
 //!
 //! Modules:
 //! - [`framing`]: LSP `Content-Length` framing, lazily parsed messages;
@@ -21,6 +22,7 @@
 //! - `render`: Markdown rendering;
 //! - `document`: mirrors of open documents (UTF-16 positions);
 //! - `abbrev`: the abbreviation table and when to replace;
+//! - `status`: declaration status as diagnostics;
 //! - `uri`: `file://` helpers.
 
 mod abbrev;
@@ -33,6 +35,7 @@ pub mod lsp;
 mod render;
 mod server;
 mod shared;
+mod status;
 mod uri;
 
 pub use shared::log;
@@ -48,6 +51,8 @@ pub struct Config {
     pub hover: bool,
     pub auto_open: bool,
     pub abbreviations: bool,
+    /// Declaration status (✅ / ⚠️ / ❌) in the editor's diagnostics.
+    pub status: bool,
 }
 
 impl Config {
@@ -57,6 +62,7 @@ impl Config {
             hover: true,
             auto_open: true,
             abbreviations: true,
+            status: true,
         }
     }
 }

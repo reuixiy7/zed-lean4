@@ -4,17 +4,15 @@
 //! Responses to the proxy's own requests to Zed are dropped.
 
 use crate::abbrev::{self, Table};
-use crate::document::Documents;
 use crate::lsp::{self, Cursor, Position, text_document_uri};
 use crate::shared::{Event, Shared, log};
-use crate::{framing, hover, uri};
+use crate::{framing, hover, status, uri};
 use serde_json::{Value, json};
 use std::io::{self, BufReader, Read};
 use std::path::PathBuf;
 
 /// State only this direction uses.
 struct Input {
-    documents: Documents,
     /// Loaded once the client is known to accept `workspace/applyEdit`.
     abbreviations: Option<Table>,
     /// Client accepts versioned `documentChanges` in workspace edits.
@@ -26,7 +24,6 @@ struct Input {
 pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
     let mut reader = BufReader::new(input);
     let mut input = Input {
-        documents: Documents::default(),
         abbreviations: None,
         document_changes: false,
         show_infoview: false,
@@ -45,13 +42,20 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
             continue;
         };
 
-        let value = msg.value();
+        let mut value = msg.value();
         let params = &value["params"];
         // Handle before forwarding, so e.g. a hover is tracked before its response.
         match method {
-            "initialize" => on_initialize(shared, &mut input, params),
+            "initialize" => {
+                on_initialize(shared, &mut input, params);
+                if shared.config.status {
+                    status::announce_silent(&mut value["params"]);
+                    shared.send_server(&value);
+                    continue;
+                }
+            }
             "textDocument/didOpen" => {
-                input.documents.open(params);
+                shared.state().documents.open(params);
                 if std::mem::take(&mut input.show_infoview) {
                     show_infoview(shared);
                 }
@@ -62,11 +66,11 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
                         uri: uri.to_owned(),
                     });
                 }
-                if let Some(edit) = abbreviation_edit(&mut input, params) {
+                if let Some(edit) = abbreviation_edit(shared, &input, params) {
                     shared.request_client("workspace/applyEdit", edit);
                 }
             }
-            "textDocument/didClose" => input.documents.close(params),
+            "textDocument/didClose" => shared.state().documents.close(params),
             "textDocument/documentHighlight" => track_cursor(shared, params, "/position"),
             "textDocument/codeAction" => track_cursor(shared, params, "/range/start"),
             "textDocument/hover" => {
@@ -151,11 +155,12 @@ fn track_cursor(shared: &Shared, params: &Value, position: &str) {
 }
 
 /// The `workspace/applyEdit` params replacing a just-finished `\abbreviation`.
-fn abbreviation_edit(input: &mut Input, params: &Value) -> Option<Value> {
-    let insertion = input.documents.change(params)?;
+fn abbreviation_edit(shared: &Shared, input: &Input, params: &Value) -> Option<Value> {
+    let mut state = shared.state();
+    let insertion = state.documents.change(params)?;
     let table = input.abbreviations.as_ref()?;
     let uri = text_document_uri(params)?;
-    let doc = input.documents.get(uri)?;
+    let doc = state.documents.get(uri)?;
     let replacement = abbrev::check(table, &doc.text, &insertion)?;
     let edit = json!({
         "range": lsp::range(replacement.start, replacement.end),

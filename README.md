@@ -25,6 +25,21 @@ lean --version
 - Abbreviations turn into symbols as you type: `\R` and a space gives `ℝ`, `\alpha` gives `α` right away. Turn off with `"abbreviations": false`.
 - The same abbreviations are also [snippets](https://github.com/owlx56/zed-lean4/blob/main/snippets/lean%204.json). Use the snippet for brackets like `\<>` if you want the cursor inside.
 
+### Declaration status
+
+Like the gutter icons in VS Code, every declaration shows how it is doing:
+
+```lean
+theorem add_comm' (a b : ℕ) : a + b = b + a := by omega    ✅ Goals accomplished
+theorem foo : 1 = 1 := by sorry                             ⚠️ declaration uses `sorry`
+theorem bar : 1 = 2 := by simp                              ❌ unsolved goals ⊢ False
+```
+
+- Zed has no gutter icons for extensions, so the status is a diagnostic. Turn on inline diagnostics in the user `settings.json` to see it at the end of the line: `{ "diagnostics": { "inline": { "enabled": true } } }`. Without it, the status shows in the hover.
+- ✅ is a hint on the name of a theorem or `Prop` `example` that Lean checked without errors or `sorry`. Like VS Code, it comes from Lean's silent "Goals accomplished!" message.
+- `Try this:` suggestions (`simp?`, `exact?`) are put on one line, `💡 Try this: simp only [h]`, so the whole suggestion fits inline. Apply it with the code action (`ctrl-.` / `cmd-.`).
+- The infoview counts proved theorems in its status line. Turn off with `"declaration_status": false`.
+
 ### Infoview
 
 Zed extensions can't add panels, so the infoview is a Markdown file shown in Zed's Markdown preview.
@@ -50,6 +65,7 @@ Settings in `lsp.lean4-lsp.settings`:
 | `infoview_auto_open` | `true` | open the infoview the first time in a project |
 | `infoview_hover` | `true` | show goals in hover |
 | `abbreviations` | `true` | replace abbreviations as you type |
+| `declaration_status` | `true` | mark declarations ✅ / ⚠️ / ❌ |
 | `infoview_proxy_path` | | use a local build of the proxy (`cargo build -p lean-infoview-proxy --release`) |
 
 ### Nested Lean project
