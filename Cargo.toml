@@ -1,3 +1,9 @@
+[workspace]
+members = [".", "proxy"]
+# Zed builds the extension with a plain `cargo build`; keep the native proxy out of it.
+default-members = ["."]
+resolver = "3"
+
 [package]
 name = "lean4"
 version = "0.4.0"
