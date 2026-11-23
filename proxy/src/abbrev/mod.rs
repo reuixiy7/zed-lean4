@@ -9,6 +9,7 @@
 //! The replacement is sent to Zed as a `workspace/applyEdit` request.
 
 pub(crate) mod completion;
+pub(crate) mod reference;
 mod table;
 
 pub use table::Table;

@@ -10,6 +10,7 @@
 //! - optionally asks Zed to open the infoview file via `window/showDocument`;
 //! - expands Unicode abbreviations (`\R` → `ℝ`) via `workspace/applyEdit` and completions;
 //! - shows the available input abbreviations when hovering Unicode symbols;
+//! - opens the infoview and complete Unicode abbreviation reference through LSP commands;
 //! - optionally marks declarations as proved (✅), using `sorry` (⚠️) or failing (❌).
 //!
 //! Modules:
@@ -17,6 +18,7 @@
 //! - [`lsp`]: request ids, positions, diagnostics, JSON-RPC envelopes;
 //! - `shared`: output streams and the router for the proxy's own requests;
 //! - `client`: Zed → Lean direction (cursor, `initialize`, documents, abbreviations);
+//! - `commands`: LSP commands for opening the infoview and abbreviation reference;
 //! - `server`: Lean → Zed direction (routing our responses, diagnostics, progress);
 //! - `hover`: merging Unicode input hints and tactic state into hover responses;
 //! - `goals`: the worker that requests goals and writes the infoview file;
@@ -28,6 +30,7 @@
 
 mod abbrev;
 mod client;
+mod commands;
 mod document;
 pub mod framing;
 mod goals;

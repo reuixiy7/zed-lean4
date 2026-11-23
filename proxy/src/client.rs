@@ -6,11 +6,10 @@
 
 use crate::abbrev::{self, Table, completion};
 use crate::lsp::{self, Cursor, Position, RequestId, text_document_uri};
-use crate::shared::{Event, Shared, log};
-use crate::{framing, hover, status, uri};
+use crate::shared::{ClientPending, Event, Initialization, Shared, log};
+use crate::{commands, framing, hover, status};
 use serde_json::{Value, json};
 use std::io::{self, BufReader, Read};
-use std::path::PathBuf;
 
 /// State only this direction uses.
 struct Input {
@@ -21,6 +20,8 @@ struct Input {
     /// Snippet edits and completion snippets are negotiated separately by LSP.
     workspace_snippets: bool,
     completion_snippets: bool,
+    /// The editor can open the infoview and abbreviation reference on demand.
+    show_document: bool,
     /// Ask Zed to open the infoview file on the next `didOpen`.
     show_infoview: bool,
 }
@@ -32,16 +33,25 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
         document_changes: false,
         workspace_snippets: false,
         completion_snippets: false,
+        show_document: false,
         show_infoview: false,
     };
     while let Some(msg) = framing::read_message(&mut reader)? {
-        if let Some(id) = msg.response_id()
-            && shared.state().client_pending.remove(&id)
-        {
-            if let Some(err) = msg.value().get("error") {
-                log(&format!("client rejected request {id:?}: {err}"));
+        if let Some(id) = msg.response_id() {
+            let pending = shared.state().client_pending.remove(&id);
+            if let Some(pending) = pending {
+                match pending {
+                    ClientPending::ShowDocument { command_id, path } => {
+                        commands::opened(shared, command_id, &path, &msg.value());
+                    }
+                    ClientPending::Ignore => {
+                        if let Some(err) = msg.value().get("error") {
+                            log(&format!("client rejected request {id:?}: {err}"));
+                        }
+                    }
+                }
+                continue;
             }
-            continue;
         }
         let Some(method) = msg.method().filter(|m| observed(shared, m)) else {
             shared.write_server(msg.raw());
@@ -54,8 +64,12 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
         match method {
             "initialize" => {
                 on_initialize(shared, &mut input, params);
-                if input.abbreviations.is_some() {
-                    shared.state().initialize_request = msg.request_id().map(RequestId::of);
+                if input.abbreviations.is_some() || input.show_document {
+                    shared.state().initialize_request = msg.request_id().map(|id| Initialization {
+                        id: RequestId::of(id),
+                        completions: input.abbreviations.is_some(),
+                        view_commands: input.show_document,
+                    });
                 }
                 if shared.config.status {
                     status::announce_silent(&mut value["params"]);
@@ -74,7 +88,7 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
                 }
                 drop(state);
                 if std::mem::take(&mut input.show_infoview) {
-                    show_infoview(shared);
+                    commands::auto_open_infoview(shared);
                 }
             }
             "textDocument/didChange" => {
@@ -124,6 +138,16 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
                     continue;
                 }
             }
+            "workspace/executeCommand" => {
+                if let Some(command) = params.get("command").and_then(Value::as_str)
+                    && commands::is_ours(command)
+                {
+                    if let Some(id) = msg.request_id() {
+                        commands::execute(shared, id, command, input.show_document);
+                    }
+                    continue;
+                }
+            }
             _ => {}
         }
         shared.write_server(msg.raw());
@@ -139,7 +163,8 @@ fn observed(shared: &Shared, method: &str) -> bool {
         | "textDocument/didChange"
         | "textDocument/didClose"
         | "textDocument/documentHighlight"
-        | "textDocument/codeAction" => true,
+        | "textDocument/codeAction"
+        | "workspace/executeCommand" => true,
         "textDocument/hover" => shared.config.hover || shared.config.abbreviations,
         "textDocument/completion" | "completionItem/resolve" => shared.config.abbreviations,
         _ => false,
@@ -158,6 +183,7 @@ fn on_initialize(shared: &Shared, input: &mut Input, params: &Value) {
         input.document_changes && capability("/workspace/workspaceEdit/snippetEditSupport");
     input.completion_snippets =
         capability("/textDocument/completion/completionItem/snippetSupport");
+    input.show_document = capability("/window/showDocument/support");
     if shared.config.abbreviations {
         if capability("/workspace/applyEdit") {
             input.abbreviations = Some(Table::load());
@@ -165,31 +191,11 @@ fn on_initialize(shared: &Shared, input: &mut Input, params: &Value) {
             log("client does not support workspace/applyEdit; abbreviations are disabled");
         }
     }
-    if shared.config.auto_open && !opened_marker(shared).exists() {
-        input.show_infoview = capability("/window/showDocument/support");
+    if shared.config.auto_open && !commands::opened_marker(shared).exists() {
+        input.show_infoview = input.show_document;
         if !input.show_infoview {
             log("client does not support window/showDocument; open the infoview file manually");
         }
-    }
-}
-
-/// Marks that the infoview was opened in this project once. Zed restores open
-/// files and previews with the layout, so opening it again would add a duplicate.
-fn opened_marker(shared: &Shared) -> PathBuf {
-    shared.config.goals_file.with_extension("opened")
-}
-
-fn show_infoview(shared: &Shared) {
-    let uri = uri::from_path(&shared.config.goals_file);
-    shared.request_client(
-        "window/showDocument",
-        json!({"uri": uri, "takeFocus": false}),
-    );
-    if let Err(e) = std::fs::write(opened_marker(shared), "") {
-        log(&format!(
-            "cannot write {}: {e}",
-            opened_marker(shared).display()
-        ));
     }
 }
 

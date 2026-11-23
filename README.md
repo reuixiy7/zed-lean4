@@ -25,9 +25,10 @@ lean --version
 - Abbreviations turn into symbols as you type: `\R` and a space gives `ℝ`, `\alpha` gives `α` right away. Turn off with `"abbreviations": false`.
 - Ending a partial abbreviation chooses the shortest matching abbreviation: `\alp` followed by a space gives `α` and keeps the space. Other characters that cannot continue the abbreviation, including punctuation and newlines, also finish it and are kept. Exact matches take priority; equal-length matches use lexical order.
 - To convert without adding whitespace, accept the Unicode completion suggestion with Tab using Zed's default key bindings. The proxy offers the same shortest match as a completion, such as `\alp` → `α` or `\R` → `ℝ`. If the suggestion is hidden, run `editor: show completions` first. When no completion is shown, Tab follows Zed's normal indentation/keymap behavior; the proxy cannot distinguish spaces inserted by Tab from manually inserted spaces.
-- Paired abbreviations place the cursor between the delimiters: `\<>` → `⟨│⟩`, `\[[]]` → `⟦│⟧`, `\f<<>>` → `«│»`, and `\norm` → `‖│‖` (`│` marks the cursor). This also works when a space ends a partial abbreviation or Tab accepts a completion. A terminating space is kept after the closing delimiter. Other pairs, including `\floor`, `\ceil`, and `\{}`, also support cursor placement. Clients without snippet support insert plain text instead.
+- Paired abbreviations place the cursor between the delimiters: `\<>` → `⟨⟩`, `\[[]]` → `⟦⟧`, `\f<<>>` → `«»`, and `\norm` → `‖‖`. This also works when a space ends a partial abbreviation or Tab accepts a completion. A terminating space is kept after the closing delimiter. Other pairs, including `\floor`, `\ceil`, and `\{}`, also support cursor placement. Clients without snippet support insert plain text instead.
 - Hover a Unicode symbol to see all abbreviations that produce it, such as `\R`, `\br`, `\bbR`, `\Real`, and `\real` for `ℝ`. Multi-character symbols such as `→ₗ` are matched as a whole. Input hints appear alongside Lean's documentation and any tactic state, and also work when Lean has no hover text. They follow the `abbreviations` setting; `infoview_hover` only controls the tactic state.
-- Automatic abbreviation input requires the proxy (`"infoview": true`).
+- To browse the complete abbreviation table, focus a Lean file, run `lsp command selector: toggle` from Zed's command palette, and select `Lean 4: Show Unicode Input Abbreviations` (no arguments needed). The proxy generates and opens `.lake/AbbreviationView.md` from its bundled mapping. The file contains only a table with abbreviations on the left and Unicode symbols on the right; `$CURSOR` marks the cursor position in paired delimiters, such as `{$CURSOR}`. Aliases remain grouped by symbol. If `infoview_file` is customized, the reference is saved beside it. This command requires Zed's LSP command selector and `window/showDocument` support, and remains available with `"abbreviations": false`.
+- Unicode input, hover hints, and the abbreviation reference require the proxy (`"infoview": true`).
 - For optional declaration and block templates, see [Optional snippets](#optional-snippets).
 
 ### Declaration status
@@ -49,9 +50,9 @@ theorem bar : 1 = 2 := by simp                              ❌ unsolved goals �
 
 Zed extensions can't add panels, so the infoview is a Markdown file shown in Zed's Markdown preview.
 
-- The extension runs the Lean server through `lean-infoview-proxy`, a small Rust binary downloaded from GitHub releases. It follows the cursor and writes goals to `.lake/infoview.md` in the project.
+- The extension runs the Lean server through `lean-infoview-proxy`, a small Rust binary downloaded from GitHub releases. It follows the cursor and writes goals to `.lake/InfoView.md` in the project.
 - It shows the goals, the expected type, messages at the cursor and all messages of the file. Lines changed by the tactic under the cursor are marked with `-- ✱`.
-- The infoview opens by itself the first time you open a Lean file in a project. After that Zed restores it with the rest of the layout. If you closed it, open `.lake/infoview.md` yourself.
+- The infoview opens by itself the first time you open a Lean file in a project. After that Zed restores it with the rest of the layout. To open it manually, focus a Lean file, run `lsp command selector: toggle` from the command palette, and select `Lean 4: Open InfoView` (no arguments needed). This also works with `"infoview_auto_open": false` and opens the configured `infoview_file` without clearing the current goals. You can also open `.lake/InfoView.md` directly.
 - Hover in a tactic block also shows the goals.
 - Zed can't open it in a split by itself. Move it to the right once and Zed keeps the layout.
 
@@ -71,7 +72,7 @@ Settings in `lsp.lean4-lsp.settings`:
 | Setting               | Default             |                                                                                 |
 | --------------------- | ------------------- | ------------------------------------------------------------------------------- |
 | `infoview`            | `true`              | `false` runs `lake serve` without the proxy                                     |
-| `infoview_file`       | `.lake/infoview.md` | where to write the infoview                                                     |
+| `infoview_file`       | `.lake/InfoView.md` | where to write the infoview                                                     |
 | `infoview_auto_open`  | `true`              | open the infoview the first time in a project                                   |
 | `infoview_hover`      | `true`              | show goals in hover                                                             |
 | `abbreviations`       | `true`              | Unicode input, completions, and abbreviation hints on hover                      |

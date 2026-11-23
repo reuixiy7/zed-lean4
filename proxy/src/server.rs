@@ -4,6 +4,7 @@
 //! to their consumer) and hover responses held back to merge in the tactic state.
 
 use crate::abbrev::completion;
+use crate::commands;
 use crate::framing;
 use crate::hover::{self, HoverWait};
 use crate::lsp::{Diagnostic, text_document_uri};
@@ -18,15 +19,17 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
         if let Some(id) = msg.response_id() {
             let (initialize, pending) = {
                 let mut state = shared.state();
-                let initialize = state
-                    .initialize_request
-                    .take_if(|request| *request == id)
-                    .is_some();
+                let initialize = state.initialize_request.take_if(|request| request.id == id);
                 (initialize, state.pending.remove(&id))
             };
-            if initialize {
+            if let Some(initialize) = initialize {
                 let mut response = msg.value();
-                completion::announce(&mut response);
+                if initialize.completions {
+                    completion::announce(&mut response);
+                }
+                if initialize.view_commands {
+                    commands::announce(&mut response);
+                }
                 shared.send_client(&response);
                 continue;
             }

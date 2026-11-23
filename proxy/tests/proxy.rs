@@ -42,7 +42,8 @@ fn fake_server(input: impl Read + Send + 'static, mut output: PipeWriter) {
             let result = match msg["method"].as_str() {
                 // Echoes the capability the proxy adds, so tests can see it arrived.
                 Some("initialize") => json!({"capabilities": {"hoverProvider": true,
-                    "completionProvider": {"resolveProvider": true, "triggerCharacters": ["."]}},
+                    "completionProvider": {"resolveProvider": true, "triggerCharacters": ["."]},
+                    "executeCommandProvider": {"commands": ["lean.original"], "workDoneProgress": true}},
                     "silent": msg.pointer("/params/capabilities/lean/silentDiagnosticSupport")}),
                 Some("$/lean/plainGoal") => json!({"goals": ["x : Nat\n⊢ x = x"], "rendered": ""}),
                 Some("$/lean/plainTermGoal") => json!({"goal": "x = x", "range": {}}),
@@ -58,6 +59,9 @@ fn fake_server(input: impl Read + Send + 'static, mut output: PipeWriter) {
                     let mut item = msg["params"].clone();
                     item["detail"] = json!("resolved by Lean");
                     item
+                }
+                Some("workspace/executeCommand") => {
+                    json!({"from": "Lean", "params": msg["params"]})
                 }
                 _ => Value::Null,
             };
@@ -127,7 +131,7 @@ fn wait_for_file(path: &PathBuf, done: impl Fn(&str) -> bool) -> String {
 #[test]
 fn proxies_tracks_cursor_and_writes_goals() {
     let dir = temp_dir("goals");
-    let goals_file = dir.join(".lake/infoview.md");
+    let goals_file = dir.join(".lake/InfoView.md");
     let mut proxy = Proxy::start(Config::new(goals_file.clone()));
 
     let uri = "file:///tmp/A.lean";
@@ -153,7 +157,7 @@ fn proxies_tracks_cursor_and_writes_goals() {
         show["params"]["uri"]
             .as_str()
             .unwrap()
-            .ends_with("/.lake/infoview.md")
+            .ends_with("/.lake/InfoView.md")
     );
     assert_eq!(show["params"]["takeFocus"], false);
 
@@ -193,7 +197,7 @@ fn unicode_hover_hints_preserve_native_content_and_respect_feature_switches() {
             .enumerate()
     {
         let dir = temp_dir(&format!("unicode-hover-{index}"));
-        let mut config = Config::new(dir.join("infoview.md"));
+        let mut config = Config::new(dir.join("InfoView.md"));
         config.auto_open = false;
         config.abbreviations = abbreviations;
         config.hover = goals;
@@ -248,10 +252,372 @@ fn unicode_hover_hints_preserve_native_content_and_respect_feature_switches() {
     }
 }
 
+const SHOW_ABBREVIATIONS: &str = "Lean 4: Show Unicode Input Abbreviations";
+const OPEN_INFOVIEW: &str = "Lean 4: Open InfoView";
+
+fn execute_command(id: Value, command: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": "workspace/executeCommand", "params": {"command": command}})
+}
+
+#[test]
+fn opens_infoview_on_command_without_auto_open_and_preserves_existing_goals() {
+    for (index, filename) in [".lake/InfoView.md", "custom/MyGoals.md"]
+        .into_iter()
+        .enumerate()
+    {
+        let dir = temp_dir(&format!("infoview-command-{index}"));
+        let goals_file = dir.join(filename);
+        let mut config = Config::new(goals_file.clone());
+        config.auto_open = false;
+        config.abbreviations = false;
+        let mut proxy = Proxy::start(config);
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "capabilities": {"window": {"showDocument": {"support": true}}}
+            }}),
+        ]);
+        let initialized = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 1));
+        let capabilities =
+            &initialized.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"];
+        assert_eq!(
+            capabilities["executeCommandProvider"]["commands"],
+            json!(["lean.original", SHOW_ABBREVIATIONS, OPEN_INFOVIEW])
+        );
+        assert!(
+            !initialized
+                .iter()
+                .any(|m| m["method"] == "window/showDocument")
+        );
+        let goals = "## Goal\n\n```lean\nx : Nat\n⊢ x = x\n```\n";
+        std::fs::write(&goals_file, goals).unwrap();
+
+        for id in ["open-infoview", "reopen-infoview"] {
+            proxy.send([execute_command(json!(id), OPEN_INFOVIEW)]);
+            let requested =
+                proxy.receive_until(|r| r.iter().any(|m| m["method"] == "window/showDocument"));
+            let open = requested
+                .iter()
+                .find(|m| m["method"] == "window/showDocument")
+                .unwrap();
+            assert_eq!(open["params"]["takeFocus"], true);
+            assert_eq!(open["params"]["external"], false);
+            assert!(open["params"]["uri"].as_str().unwrap().ends_with(filename));
+            assert_eq!(std::fs::read_to_string(&goals_file).unwrap(), goals);
+            assert!(!requested.iter().any(|m| m["id"] == id));
+            proxy.send([json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}})]);
+            let completed = proxy.receive_until(|r| r.iter().any(|m| m["id"] == id));
+            assert_eq!(
+                completed.iter().find(|m| m["id"] == id).unwrap(),
+                &json!({"jsonrpc": "2.0", "id": id, "result": null})
+            );
+            assert!(goals_file.with_extension("opened").exists());
+        }
+        assert!(!goals_file.with_file_name("AbbreviationView.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn infoview_command_recreates_missing_files_and_reports_write_failures() {
+    let dir = temp_dir("infoview-command-missing");
+    let goals_file = dir.join(".lake/InfoView.md");
+    let mut config = Config::new(goals_file.clone());
+    config.auto_open = false;
+    let mut proxy = Proxy::start(config);
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {"window": {"showDocument": {"support": true}}}
+        }}),
+    ]);
+    assert!(
+        proxy
+            .receive_until(|r| r.iter().any(|m| m["id"] == 1))
+            .iter()
+            .any(|m| m["id"] == 1)
+    );
+    std::fs::remove_file(&goals_file).unwrap();
+    proxy.send([execute_command(json!(2), OPEN_INFOVIEW)]);
+    let requested = proxy.receive_until(|r| r.iter().any(|m| m["method"] == "window/showDocument"));
+    let open = requested
+        .iter()
+        .find(|m| m["method"] == "window/showDocument")
+        .unwrap();
+    assert!(
+        std::fs::read_to_string(&goals_file)
+            .unwrap()
+            .contains("Move the cursor inside a Lean file")
+    );
+    proxy.send([json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}})]);
+    assert!(
+        proxy
+            .receive_until(|r| r.iter().any(|m| m["id"] == 2))
+            .iter()
+            .any(|m| m["id"] == 2)
+    );
+
+    std::fs::remove_file(&goals_file).unwrap();
+    std::fs::create_dir(&goals_file).unwrap();
+    proxy.send([execute_command(json!(3), OPEN_INFOVIEW)]);
+    let received = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 3));
+    let response = received.iter().find(|m| m["id"] == 3).unwrap();
+    assert_eq!(response["error"]["code"], -32803);
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Cannot write")
+    );
+    assert!(
+        !received
+            .iter()
+            .any(|m| m["method"] == "window/showDocument")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn opens_the_complete_reference_on_demand_and_preserves_lean_commands() {
+    for abbreviations in [true, false] {
+        let dir = temp_dir(&format!("reference-{abbreviations}"));
+        let reference = dir.join(".lake/AbbreviationView.md");
+        let mut config = Config::new(dir.join(".lake/InfoView.md"));
+        config.auto_open = false;
+        config.abbreviations = abbreviations;
+        let mut proxy = Proxy::start(config);
+        // Browsing does not need workspace/applyEdit or automatic Unicode input.
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "capabilities": {"window": {"showDocument": {"support": true}}}
+            }}),
+        ]);
+        let initialized = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 1));
+        let capabilities =
+            &initialized.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"];
+        assert_eq!(
+            capabilities["executeCommandProvider"],
+            json!({
+                "commands": ["lean.original", SHOW_ABBREVIATIONS, OPEN_INFOVIEW], "workDoneProgress": true,
+            })
+        );
+        assert_eq!(
+            capabilities["completionProvider"]["triggerCharacters"],
+            json!(["."])
+        );
+        assert!(
+            !reference.exists(),
+            "do not create the reference at startup"
+        );
+
+        let command_id = json!("browse-unicode");
+        proxy.send([execute_command(command_id.clone(), SHOW_ABBREVIATIONS)]);
+        let requested =
+            proxy.receive_until(|r| r.iter().any(|m| m["method"] == "window/showDocument"));
+        let open = requested
+            .iter()
+            .find(|m| m["method"] == "window/showDocument")
+            .unwrap();
+        assert_eq!(open["params"]["takeFocus"], true);
+        assert_eq!(open["params"]["external"], false);
+        assert!(
+            open["params"]["uri"]
+                .as_str()
+                .unwrap()
+                .ends_with("/.lake/AbbreviationView.md")
+        );
+        assert!(
+            !requested.iter().any(|m| m["id"] == command_id),
+            "wait for the open result"
+        );
+        let text = std::fs::read_to_string(&reference).unwrap();
+        assert!(text.starts_with("| Abbreviation | Unicode symbol |\n| --- | --- |\n"));
+        assert!(text.contains("` \\R `, ` \\br `, ` \\bbR `, ` \\Real `, ` \\real `"));
+        assert!(text.contains(" | ` ⟨$CURSOR⟩ ` |"));
+        assert!(text.contains(" | ` →ₗ ` |"));
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}}),
+            execute_command(json!(2), "lean.original"),
+        ]);
+        let completed = proxy.receive_until(|r| {
+            r.iter().any(|m| m["id"] == command_id) && r.iter().any(|m| m["id"] == 2)
+        });
+        assert_eq!(
+            completed.iter().find(|m| m["id"] == command_id).unwrap(),
+            &json!({"jsonrpc": "2.0", "id": command_id, "result": null})
+        );
+        assert_eq!(
+            completed.iter().find(|m| m["id"] == 2).unwrap()["result"],
+            json!({"from": "Lean", "params": {"command": "lean.original"}})
+        );
+
+        // Reopening unchanged data must not trigger another file rewrite.
+        let old_time = std::time::UNIX_EPOCH + Duration::from_secs(946_684_800);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&reference)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+        proxy.send([execute_command(json!(3), SHOW_ABBREVIATIONS)]);
+        let reopened =
+            proxy.receive_until(|r| r.iter().any(|m| m["method"] == "window/showDocument"));
+        let open = reopened
+            .iter()
+            .find(|m| m["method"] == "window/showDocument")
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&reference).unwrap().modified().unwrap(),
+            old_time
+        );
+        proxy.send([json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}})]);
+        assert!(
+            proxy
+                .receive_until(|r| r.iter().any(|m| m["id"] == 3))
+                .iter()
+                .any(|m| m["id"] == 3)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn view_commands_are_not_advertised_without_show_document_support() {
+    let dir = temp_dir("reference-unsupported");
+    let mut config = Config::new(dir.join("InfoView.md"));
+    config.auto_open = false;
+    let mut proxy = Proxy::start(config);
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {"workspace": {"applyEdit": true}}
+        }}),
+        execute_command(json!(2), SHOW_ABBREVIATIONS),
+        execute_command(json!(3), OPEN_INFOVIEW),
+    ]);
+    let received = proxy.receive_until(|r| (1..=3).all(|id| r.iter().any(|m| m["id"] == id)));
+    assert_eq!(
+        received.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"]["executeCommandProvider"],
+        json!({"commands": ["lean.original"], "workDoneProgress": true})
+    );
+    for id in [2, 3] {
+        assert!(
+            received.iter().find(|m| m["id"] == id).unwrap()["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("window/showDocument")
+        );
+    }
+    assert!(
+        !received
+            .iter()
+            .any(|m| m["method"] == "window/showDocument")
+    );
+    assert!(!dir.join("AbbreviationView.md").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn view_commands_report_open_failures_and_protocol_errors() {
+    let dir = temp_dir("reference-open-failure");
+    let mut config = Config::new(dir.join("InfoView.md"));
+    config.auto_open = false;
+    let mut proxy = Proxy::start(config);
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {"window": {"showDocument": {"support": true}}}
+        }}),
+    ]);
+    for (index, (command, reply)) in [
+        (SHOW_ABBREVIATIONS, json!({"result": {"success": false}})),
+        (
+            SHOW_ABBREVIATIONS,
+            json!({"error": {"code": -32603, "message": "file could not be opened"}}),
+        ),
+        (OPEN_INFOVIEW, json!({"result": {"success": false}})),
+        (
+            OPEN_INFOVIEW,
+            json!({"error": {"code": -32603, "message": "file could not be opened"}}),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = json!(index + 2);
+        proxy.send([execute_command(id.clone(), command)]);
+        let received =
+            proxy.receive_until(|r| r.iter().any(|m| m["method"] == "window/showDocument"));
+        let open = received
+            .iter()
+            .find(|m| m["method"] == "window/showDocument")
+            .unwrap();
+        let mut reply = reply;
+        reply["jsonrpc"] = json!("2.0");
+        reply["id"] = open["id"].clone();
+        proxy.send([reply]);
+        let completed = proxy.receive_until(|r| r.iter().any(|m| m["id"] == id));
+        let response = completed.iter().find(|m| m["id"] == id).unwrap();
+        assert_eq!(response["error"]["code"], -32803);
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Cannot open")
+        );
+    }
+    assert!(!dir.join("InfoView.opened").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reference_command_reports_write_failures_and_does_not_overwrite_the_infoview() {
+    for collision in [true, false] {
+        let dir = temp_dir(&format!("reference-write-failure-{collision}"));
+        let path = dir.join("AbbreviationView.md");
+        let goals = if collision {
+            path.clone()
+        } else {
+            dir.join("InfoView.md")
+        };
+        let mut config = Config::new(goals.clone());
+        config.auto_open = false;
+        let mut proxy = Proxy::start(config);
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "capabilities": {"window": {"showDocument": {"support": true}}}
+            }}),
+        ]);
+        assert!(
+            proxy
+                .receive_until(|r| r.iter().any(|m| m["id"] == 1))
+                .iter()
+                .any(|m| m["id"] == 1)
+        );
+        let infoview = std::fs::read(&goals).unwrap();
+        if !collision {
+            std::fs::create_dir(&path).unwrap();
+        }
+        proxy.send([execute_command(json!(2), SHOW_ABBREVIATIONS)]);
+        let received = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 2));
+        let response = received.iter().find(|m| m["id"] == 2).unwrap();
+        assert_eq!(response["error"]["code"], -32803);
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Cannot write")
+        );
+        assert!(
+            !received
+                .iter()
+                .any(|m| m["method"] == "window/showDocument")
+        );
+        assert_eq!(std::fs::read(&goals).unwrap(), infoview);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 #[test]
 fn expands_abbreviation_with_apply_edit() {
     let dir = temp_dir("abbrev");
-    let mut config = Config::new(dir.join("infoview.md"));
+    let mut config = Config::new(dir.join("InfoView.md"));
     config.auto_open = false;
     let mut proxy = Proxy::start(config);
 
@@ -290,7 +656,7 @@ fn expands_abbreviation_with_apply_edit() {
 #[test]
 fn finishes_partial_abbreviations_with_a_versioned_edit() {
     let dir = temp_dir("abbrev-prefix");
-    let mut config = Config::new(dir.join("infoview.md"));
+    let mut config = Config::new(dir.join("InfoView.md"));
     config.auto_open = false;
     let mut proxy = Proxy::start(config);
     let uri = "file:///tmp/Prefix.lean";
@@ -326,7 +692,7 @@ fn finishes_partial_abbreviations_with_a_versioned_edit() {
 #[test]
 fn offers_unicode_completions_and_keeps_lean_completions_working() {
     let dir = temp_dir("abbrev-completion");
-    let mut config = Config::new(dir.join("infoview.md"));
+    let mut config = Config::new(dir.join("InfoView.md"));
     config.auto_open = false;
     let mut proxy = Proxy::start(config);
     let uri = "file:///tmp/Completion.lean";
@@ -390,7 +756,7 @@ fn offers_unicode_completions_and_keeps_lean_completions_working() {
 #[test]
 fn disabled_abbreviations_leave_completion_capabilities_and_requests_unchanged() {
     let dir = temp_dir("abbrev-disabled");
-    let mut config = Config::new(dir.join("infoview.md"));
+    let mut config = Config::new(dir.join("InfoView.md"));
     config.auto_open = false;
     config.abbreviations = false;
     let mut proxy = Proxy::start(config);
@@ -421,7 +787,7 @@ fn disabled_abbreviations_leave_completion_capabilities_and_requests_unchanged()
 #[test]
 fn paired_abbreviations_use_versioned_snippets_when_typed_or_terminated() {
     let dir = temp_dir("paired-edits");
-    let mut config = Config::new(dir.join("infoview.md"));
+    let mut config = Config::new(dir.join("InfoView.md"));
     config.auto_open = false;
     let mut proxy = Proxy::start(config);
     proxy.send([
@@ -496,7 +862,7 @@ fn workspace_and_completion_snippet_capabilities_are_independent() {
     .enumerate()
     {
         let dir = temp_dir(&format!("paired-capabilities-{index}"));
-        let mut config = Config::new(dir.join("infoview.md"));
+        let mut config = Config::new(dir.join("InfoView.md"));
         config.auto_open = false;
         let mut proxy = Proxy::start(config);
         let uri = "file:///tmp/PartialPair.lean";
@@ -566,7 +932,7 @@ fn workspace_and_completion_snippet_capabilities_are_independent() {
 #[test]
 fn opens_infoview_once_per_project() {
     let dir = temp_dir("open-once");
-    let goals_file = dir.join(".lake/infoview.md");
+    let goals_file = dir.join(".lake/InfoView.md");
     let open = |proxy: &mut Proxy| {
         proxy.send([
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -583,7 +949,7 @@ fn opens_infoview_once_per_project() {
     };
 
     assert!(open(&mut Proxy::start(Config::new(goals_file.clone()))));
-    let opened = dir.join(".lake/infoview.opened");
+    let opened = dir.join(".lake/InfoView.opened");
     wait_for_file(&opened, |_| opened.exists());
     assert!(opened.exists());
     // Zed restores the open preview with the layout; do not open a second one.
@@ -594,7 +960,7 @@ fn opens_infoview_once_per_project() {
 #[test]
 fn marks_proved_theorems() {
     let dir = temp_dir("status");
-    let mut config = Config::new(dir.join(".lake/infoview.md"));
+    let mut config = Config::new(dir.join(".lake/InfoView.md"));
     config.auto_open = false;
     let goals_file = config.goals_file.clone();
     let mut proxy = Proxy::start(config);

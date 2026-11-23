@@ -6,7 +6,7 @@ const PROXY_REPO: &str = "reuixiy7/zed-lean4";
 const PROXY_NAME: &str = "lean-infoview-proxy";
 /// The proxy release matching this extension, tagged `v<version>`.
 const PROXY_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
-const DEFAULT_INFOVIEW_FILE: &str = ".lake/infoview.md";
+const DEFAULT_INFOVIEW_FILE: &str = ".lake/InfoView.md";
 
 /// Proxy flags turned on by setting these to `false`.
 const PROXY_FLAGS: [(&str, &str); 4] = [

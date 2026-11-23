@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::ops::{Bound, Range};
 
-const ABBREVIATIONS: &str = include_str!("../../data/abbreviations.json");
+pub(super) const ABBREVIATIONS: &str = include_str!("../../data/abbreviations.json");
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Expansion {

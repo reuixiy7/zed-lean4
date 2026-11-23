@@ -7,7 +7,7 @@ const USAGE: &str = "usage: lean-infoview-proxy --goals-file <path> [--no-hover]
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    let mut config = Config::new(PathBuf::from(".lake/infoview.md"));
+    let mut config = Config::new(PathBuf::from(".lake/InfoView.md"));
     loop {
         match args.next().as_deref() {
             Some("--goals-file") => match args.next() {

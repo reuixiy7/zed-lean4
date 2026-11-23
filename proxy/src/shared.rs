@@ -6,8 +6,9 @@ use crate::framing;
 use crate::hover::Hover;
 use crate::lsp::{self, Cursor, Diagnostic, RequestId};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Mutex, MutexGuard};
@@ -28,6 +29,21 @@ pub enum Pending {
     Goal(GoalKind),
     /// The goal for the client's hover request with this id.
     Hover(RequestId),
+}
+
+/// How to handle a response to one of our requests to the editor.
+pub enum ClientPending {
+    Ignore,
+    ShowDocument {
+        command_id: RequestId,
+        path: PathBuf,
+    },
+}
+
+pub struct Initialization {
+    pub id: RequestId,
+    pub completions: bool,
+    pub view_commands: bool,
 }
 
 /// Events for the goals worker.
@@ -56,11 +72,11 @@ pub enum Event {
 #[derive(Default)]
 pub struct State {
     /// Client initialization request whose reply needs proxy capabilities.
-    pub initialize_request: Option<RequestId>,
+    pub initialize_request: Option<Initialization>,
     /// Our requests to the server, by id.
     pub pending: HashMap<RequestId, Pending>,
-    /// Our requests to the client; their responses are dropped.
-    pub client_pending: HashSet<RequestId>,
+    /// Our requests to the client, whose responses stay inside the proxy.
+    pub client_pending: HashMap<RequestId, ClientPending>,
     /// Client hover requests receiving goals and/or Unicode input hints.
     pub hovers: HashMap<RequestId, Hover>,
     /// Mirrors of the open documents.
@@ -189,8 +205,12 @@ impl Shared {
 
     /// Sends a request of ours to the client; its response is not forwarded.
     pub fn request_client(&self, method: &str, params: Value) {
+        self.request_client_with(method, params, ClientPending::Ignore);
+    }
+
+    pub fn request_client_with(&self, method: &str, params: Value, pending: ClientPending) {
         let id = self.fresh_id();
-        self.state().client_pending.insert(id.clone());
+        self.state().client_pending.insert(id.clone(), pending);
         self.send_client(&lsp::request(&id, method, params));
     }
 
