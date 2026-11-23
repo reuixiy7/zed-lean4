@@ -1,13 +1,11 @@
 //! The abbreviation table (`R` → `ℝ`, `alpha` → `α`, …).
 //!
-//! Loaded from the extension's snippets file, whose `lean-*` entries are the Lean 4
-//! abbreviations (`"prefix": "\\R", "body": "ℝ"`), so there is a single source of truth.
+//! Loaded from the proxy's embedded abbreviation-to-Unicode mapping.
 
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-const SNIPPETS: &str = include_str!("../../../snippets/lean 4.json");
+const ABBREVIATIONS: &str = include_str!("../../data/abbreviations.json");
 
 pub struct Table {
     map: BTreeMap<String, String>,
@@ -15,22 +13,10 @@ pub struct Table {
 
 impl Table {
     pub fn load() -> Self {
-        let snippets: Value = serde_json::from_str(SNIPPETS).unwrap_or_default();
-        let mut map = BTreeMap::new();
-        for (name, snippet) in snippets.as_object().into_iter().flatten() {
-            if !name.starts_with("lean-") {
-                continue;
-            }
-            let prefix = snippet.get("prefix").and_then(Value::as_str);
-            let body = snippet.get("body").and_then(Value::as_str);
-            if let (Some(prefix), Some(body)) = (prefix, body)
-                && let Some(abbr) = prefix.strip_prefix('\\')
-            {
-                // Bracket pairs such as `⟨$0⟩` mark the cursor; an edit cannot place it.
-                map.insert(abbr.to_owned(), body.replace("$0", ""));
-            }
+        Self {
+            map: serde_json::from_str(ABBREVIATIONS)
+                .expect("invalid embedded Lean abbreviation table"),
         }
-        Self { map }
     }
 
     #[cfg(test)]
@@ -71,7 +57,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn loads_snippets() {
+    fn loads_abbreviations() {
         let table = Table::load();
         assert!(table.map.len() > 1000);
         assert_eq!(table.get("R"), Some("ℝ"));

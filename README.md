@@ -23,7 +23,8 @@ lean --version
 ### Abbreviation
 
 - Abbreviations turn into symbols as you type: `\R` and a space gives `ℝ`, `\alpha` gives `α` right away. Turn off with `"abbreviations": false`.
-- The same abbreviations are also [snippets](https://github.com/owlx56/zed-lean4/blob/main/snippets/lean%204.json). Use the snippet for brackets like `\<>` if you want the cursor inside.
+- Automatic abbreviation input requires the proxy (`"infoview": true`). Bracket abbreviations such as `\<>` insert both delimiters (`⟨⟩`) without placing the cursor inside.
+- For optional declaration and block templates, see [Optional snippets](#optional-snippets).
 
 ### Declaration status
 
@@ -109,6 +110,40 @@ Settings in `lsp.lean4-lsp.settings`:
   }
 }
 ```
+
+## Optional snippets
+
+To add your own Lean templates, run `snippets: configure snippets` from Zed's command palette and open the Lean 4 scope (`lean 4.json`). Copy or merge the following into that local snippets file. These templates are optional and are not bundled with the extension. See [Zed's snippets documentation](https://zed.dev/docs/snippets) for customization.
+
+```json
+{
+  "calc": {
+    "prefix": "calc",
+    "body": [
+      "calc ${1:start} = ${2:first} := by ${3:sorry}",
+      "  _ = ${4:second} := by ${5:sorry}"
+    ],
+    "description": "Scaffolding for authoring `calc` blocks"
+  },
+  "example": {
+    "prefix": "example",
+    "body": ["example : ${1:type} := ${2:term}"],
+    "description": "An `example` declaration"
+  },
+  "namespace": {
+    "prefix": "ns",
+    "body": ["namespace ${1:name}", "", "end $1"],
+    "description": "A new Lean namespace"
+  },
+  "section": {
+    "prefix": "section",
+    "body": ["section ${1:name}", "", "end $1"],
+    "description": "A new Lean section"
+  }
+}
+```
+
+The `ns` prefix expands to a `namespace` block. Press Tab to move between placeholders; repeated placeholders such as `${1:name}` and `$1` keep the opening and closing names in sync.
 
 ## TODO list
 
