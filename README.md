@@ -29,7 +29,12 @@ lean --version
 - Hover a Unicode symbol to see all abbreviations that produce it, such as `\R`, `\br`, `\bbR`, `\Real`, and `\real` for `ℝ`. Multi-character symbols such as `→ₗ` are matched as a whole. Input hints appear alongside Lean's documentation and any tactic state, and also work when Lean has no hover text. They follow the `abbreviations` setting; `infoview_hover` only controls the tactic state.
 - To browse the complete abbreviation table, focus a Lean file, run `lsp command selector: toggle` from Zed's command palette, and select `Lean 4: Show Unicode Input Abbreviations` (no arguments needed). The proxy generates and opens `.lake/AbbreviationView.md` from its bundled mapping. The file contains only a table with abbreviations on the left and Unicode symbols on the right; `$CURSOR` marks the cursor position in paired delimiters, such as `{$CURSOR}`. Aliases remain grouped by symbol. If `infoview_file` is customized, the reference is saved beside it. This command requires Zed's LSP command selector and `window/showDocument` support, and remains available with `"abbreviations": false`.
 - Unicode input, hover hints, and the abbreviation reference require the proxy (`"infoview": true`).
-- For optional declaration and block templates, see [Optional snippets](#optional-snippets).
+
+### Snippets
+
+The extension includes thirteen templates with full keyword prefixes: `calc`, `example`, `namespace`, `section`, `variable`, `inductive`, `structure`, `class`, `theorem`, `def`, `instance`, `have`, and `match`. Type a keyword and select its snippet completion. Press Tab to move between placeholders; namespace and section names stay in sync with their matching `end` names. After entering a block name, the final cursor position is inside the block. These templates work independently of the proxy.
+
+See [the bundled templates](snippets/lean%204.json). To add your own templates, run `snippets: configure snippets` from Zed's command palette and open the Lean 4 scope (`lean 4.json`). See [Zed's snippets documentation](https://zed.dev/docs/snippets) for customization.
 
 ### Declaration status
 
@@ -115,40 +120,6 @@ Settings in `lsp.lean4-lsp.settings`:
   }
 }
 ```
-
-## Optional snippets
-
-To add your own Lean templates, run `snippets: configure snippets` from Zed's command palette and open the Lean 4 scope (`lean 4.json`). Copy or merge the following into that local snippets file. These templates are optional and are not bundled with the extension. See [Zed's snippets documentation](https://zed.dev/docs/snippets) for customization.
-
-```json
-{
-  "calc": {
-    "prefix": "calc",
-    "body": [
-      "calc ${1:start} = ${2:first} := by ${3:sorry}",
-      "  _ = ${4:second} := by ${5:sorry}"
-    ],
-    "description": "Scaffolding for authoring `calc` blocks"
-  },
-  "example": {
-    "prefix": "example",
-    "body": ["example : ${1:type} := ${2:term}"],
-    "description": "An `example` declaration"
-  },
-  "namespace": {
-    "prefix": "ns",
-    "body": ["namespace ${1:name}", "", "end $1"],
-    "description": "A new Lean namespace"
-  },
-  "section": {
-    "prefix": "section",
-    "body": ["section ${1:name}", "", "end $1"],
-    "description": "A new Lean section"
-  }
-}
-```
-
-The `ns` prefix expands to a `namespace` block. Press Tab to move between placeholders; repeated placeholders such as `${1:name}` and `$1` keep the opening and closing names in sync.
 
 ## TODO list
 

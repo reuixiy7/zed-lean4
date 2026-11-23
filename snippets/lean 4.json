@@ -1,0 +1,111 @@
+{
+  "calc": {
+    "prefix": "calc",
+    "body": [
+      "calc",
+      "  ${1:start} = ${2:first} := by ${3:sorry}",
+      "  _ = ${4:second} := by ${5:sorry}"
+    ],
+    "description": "An equational calc block"
+  },
+  "example": {
+    "prefix": "example",
+    "body": [
+      "example : ${1:type} := ${2:term}"
+    ],
+    "description": "An example declaration"
+  },
+  "namespace": {
+    "prefix": "namespace",
+    "body": [
+      "namespace ${1:name}",
+      "",
+      "$0",
+      "",
+      "end $1"
+    ],
+    "description": "A namespace with a matching end"
+  },
+  "section": {
+    "prefix": "section",
+    "body": [
+      "section ${1:name}",
+      "",
+      "$0",
+      "",
+      "end $1"
+    ],
+    "description": "A named section with a matching end"
+  },
+  "variable": {
+    "prefix": "variable",
+    "body": [
+      "variable (${1:x} : ${2:Nat})$0"
+    ],
+    "description": "A variable declaration"
+  },
+  "inductive": {
+    "prefix": "inductive",
+    "body": [
+      "inductive ${1:Name} where",
+      "  | ${2:constructor}$0"
+    ],
+    "description": "An inductive type declaration"
+  },
+  "structure": {
+    "prefix": "structure",
+    "body": [
+      "structure ${1:Name} where",
+      "  ${2:field} : ${3:Nat}$0"
+    ],
+    "description": "A structure declaration"
+  },
+  "class": {
+    "prefix": "class",
+    "body": [
+      "class ${1:Name} where",
+      "  ${2:field} : ${3:Nat}$0"
+    ],
+    "description": "A type class declaration"
+  },
+  "theorem": {
+    "prefix": "theorem",
+    "body": [
+      "theorem ${1:name} : ${2:statement} := by",
+      "  ${0:sorry}"
+    ],
+    "description": "A theorem with a tactic proof"
+  },
+  "def": {
+    "prefix": "def",
+    "body": [
+      "def ${1:name} : ${2:type} := ${0:term}"
+    ],
+    "description": "A definition"
+  },
+  "instance": {
+    "prefix": "instance",
+    "body": [
+      "instance : ${1:Class} where",
+      "  ${2:field} := ${0:value}"
+    ],
+    "description": "An anonymous type class instance"
+  },
+  "have": {
+    "prefix": "have",
+    "body": [
+      "have ${1:h} : ${2:statement} := by",
+      "  ${0:sorry}"
+    ],
+    "description": "A local fact with a tactic proof"
+  },
+  "match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} with",
+      "| ${2:pattern} => ${3:result}",
+      "| ${4:pattern} => ${0:result}"
+    ],
+    "description": "A match expression with two branches"
+  }
+}
