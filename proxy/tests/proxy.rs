@@ -352,6 +352,151 @@ fn disabled_abbreviations_leave_completion_capabilities_and_requests_unchanged()
 }
 
 #[test]
+fn paired_abbreviations_use_versioned_snippets_when_typed_or_terminated() {
+    let dir = temp_dir("paired-edits");
+    let mut config = Config::new(dir.join("infoview.md"));
+    config.auto_open = false;
+    let mut proxy = Proxy::start(config);
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {"workspace": {"applyEdit": true, "workspaceEdit": {
+                "documentChanges": true, "snippetEditSupport": true
+            }}}
+        }}),
+    ]);
+
+    for (index, (abbr, snippet)) in [
+        ("<>", "⟨${0}⟩"),
+        ("[[]]", "⟦${0}⟧"),
+        ("f<<>>", "«${0}»"),
+        ("norm", "‖${0}‖"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for terminated in [false, true] {
+            let uri = format!("file:///tmp/Pair{index}-{terminated}.lean");
+            let (before, typed) = if terminated {
+                (abbr, " ")
+            } else {
+                abbr.split_at(abbr.len() - 1)
+            };
+            let text = format!("𝔸 \\{before}");
+            let character = text.encode_utf16().count();
+            proxy.send([
+                json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                    "uri": uri, "languageId": "lean4", "version": 1, "text": text
+                }}}),
+                json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+                    "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{
+                        "range": {"start": {"line": 0, "character": character},
+                                  "end": {"line": 0, "character": character}}, "text": typed
+                    }]
+                }}),
+            ]);
+            let received =
+                proxy.receive_until(|r| r.iter().any(|m| m["method"] == "workspace/applyEdit"));
+            let request = received
+                .iter()
+                .find(|m| m["method"] == "workspace/applyEdit")
+                .unwrap();
+            let change = &request["params"]["edit"]["documentChanges"][0];
+            assert_eq!(change["textDocument"], json!({"uri": uri, "version": 2}));
+            assert_eq!(
+                change["edits"][0],
+                json!({
+                    "range": {"start": {"line": 0, "character": 3},
+                              "end": {"line": 0, "character": 4 + abbr.len()}},
+                    "snippet": {"kind": "snippet", "value": snippet}
+                }),
+                "{abbr}, terminated={terminated}"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn workspace_and_completion_snippet_capabilities_are_independent() {
+    for (index, (document_changes, workspace_snippets, completion_snippets)) in [
+        (true, true, true),
+        (true, false, true),
+        (true, true, false),
+        (true, false, false),
+        (false, true, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dir = temp_dir(&format!("paired-capabilities-{index}"));
+        let mut config = Config::new(dir.join("infoview.md"));
+        config.auto_open = false;
+        let mut proxy = Proxy::start(config);
+        let uri = "file:///tmp/PartialPair.lean";
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {
+                "workspace": {"applyEdit": true, "workspaceEdit": {
+                    "documentChanges": document_changes, "snippetEditSupport": workspace_snippets
+                }},
+                "textDocument": {"completion": {"completionItem": {"snippetSupport": completion_snippets}}}
+            }}}),
+            json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                "uri": uri, "languageId": "lean4", "version": 1, "text": "\\nor"
+            }}}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "textDocument/completion", "params": {
+                "textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}
+            }}),
+            json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+                "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{
+                    "range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 4}},
+                    "text": " "
+                }]
+            }}),
+        ]);
+        let received = proxy.receive_until(|r| {
+            r.iter().any(|m| m["id"] == 2) && r.iter().any(|m| m["method"] == "workspace/applyEdit")
+        });
+        let item = &received.iter().find(|m| m["id"] == 2).unwrap()["result"]["items"][0];
+        assert_eq!(
+            item["insertTextFormat"],
+            if completion_snippets { 2 } else { 1 }
+        );
+        assert_eq!(
+            item["textEdit"]["newText"],
+            if completion_snippets {
+                "‖${0}‖"
+            } else {
+                "‖‖"
+            }
+        );
+        let request = received
+            .iter()
+            .find(|m| m["method"] == "workspace/applyEdit")
+            .unwrap();
+        let edit = if document_changes {
+            &request["params"]["edit"]["documentChanges"][0]["edits"][0]
+        } else {
+            &request["params"]["edit"]["changes"][uri][0]
+        };
+        assert_eq!(
+            edit["range"]["end"]["character"], 4,
+            "the space is outside the replacement"
+        );
+        if document_changes && workspace_snippets {
+            assert_eq!(
+                edit["snippet"],
+                json!({"kind": "snippet", "value": "‖${0}‖"})
+            );
+            assert!(edit.get("newText").is_none());
+        } else {
+            assert_eq!(edit["newText"], "‖‖");
+            assert!(edit.get("snippet").is_none());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn opens_infoview_once_per_project() {
     let dir = temp_dir("open-once");
     let goals_file = dir.join(".lake/infoview.md");
@@ -371,7 +516,9 @@ fn opens_infoview_once_per_project() {
     };
 
     assert!(open(&mut Proxy::start(Config::new(goals_file.clone()))));
-    assert!(dir.join(".lake/infoview.opened").exists());
+    let opened = dir.join(".lake/infoview.opened");
+    wait_for_file(&opened, |_| opened.exists());
+    assert!(opened.exists());
     // Zed restores the open preview with the layout; do not open a second one.
     assert!(!open(&mut Proxy::start(Config::new(goals_file))));
     let _ = std::fs::remove_dir_all(&dir);

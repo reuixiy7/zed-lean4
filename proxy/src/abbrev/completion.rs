@@ -34,9 +34,9 @@ pub fn announce(response: &mut Value) {
     }
 }
 
-/// Return one best match, replacing the backslash and prefix with plain Unicode.
+/// Return one best match, using a snippet for internal cursor placement if supported.
 /// An incomplete list makes the editor re-query after further typing.
-pub fn at(table: &Table, doc: &Document, position: Position) -> Option<Value> {
+pub fn at(table: &Table, doc: &Document, position: Position, snippets: bool) -> Option<Value> {
     let line = doc.line(position.line);
     let end = column_offset(line, position.character);
     if utf16_len(&line[..end]) != position.character {
@@ -58,16 +58,17 @@ pub fn at(table: &Table, doc: &Document, position: Position) -> Option<Value> {
         line: position.line,
         character: utf16_len(&line[..backslash]),
     };
+    let snippet = snippets.then_some(symbol.snippet.as_deref()).flatten();
     Some(json!({
         "isIncomplete": true,
         "items": [{
             "label": format!("\\{abbr}"),
             "kind": 12,
-            "detail": format!("Lean Unicode: {symbol}"),
+            "detail": format!("Lean Unicode: {}", symbol.text),
             "filterText": format!("\\{abbr}"),
             "preselect": true,
-            "insertTextFormat": 1,
-            "textEdit": {"range": lsp::range(start, position), "newText": symbol},
+            "insertTextFormat": if snippet.is_some() { 2 } else { 1 },
+            "textEdit": {"range": lsp::range(start, position), "newText": snippet.unwrap_or(&symbol.text)},
             "data": {MARKER: true},
         }],
     }))
@@ -90,7 +91,12 @@ mod tests {
             line: 0,
             character: utf16_len(text),
         };
-        at(&Table::load(), &Document::new(text.to_owned(), 1), position)
+        at(
+            &Table::load(),
+            &Document::new(text.to_owned(), 1),
+            position,
+            true,
+        )
     }
 
     #[test]
@@ -137,9 +143,38 @@ mod tests {
                     line: 0,
                     character: 4
                 },
+                true,
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn paired_completions_put_the_cursor_inside_only_when_supported() {
+        let table = Table::load();
+        for (prefix, text, snippet) in [
+            ("<>", "⟨⟩", "⟨${0}⟩"),
+            ("[[]]", "⟦⟧", "⟦${0}⟧"),
+            ("f<<>", "«»", "«${0}»"),
+            ("nor", "‖‖", "‖${0}‖"),
+        ] {
+            let source = format!("\\{prefix}");
+            let position = Position {
+                line: 0,
+                character: utf16_len(&source),
+            };
+            let doc = Document::new(source, 1);
+            for supported in [true, false] {
+                let result = at(&table, &doc, position, supported).unwrap();
+                let item = &result["items"][0];
+                assert_eq!(item["insertTextFormat"], if supported { 2 } else { 1 });
+                assert_eq!(
+                    item["textEdit"]["newText"],
+                    if supported { snippet } else { text }
+                );
+                assert_eq!(item["detail"], format!("Lean Unicode: {text}"));
+            }
+        }
     }
 
     #[test]

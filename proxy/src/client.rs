@@ -18,6 +18,9 @@ struct Input {
     abbreviations: Option<Table>,
     /// Client accepts versioned `documentChanges` in workspace edits.
     document_changes: bool,
+    /// Snippet edits and completion snippets are negotiated separately by LSP.
+    workspace_snippets: bool,
+    completion_snippets: bool,
     /// Ask Zed to open the infoview file on the next `didOpen`.
     show_infoview: bool,
 }
@@ -27,6 +30,8 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
     let mut input = Input {
         abbreviations: None,
         document_changes: false,
+        workspace_snippets: false,
+        completion_snippets: false,
         show_infoview: false,
     };
     while let Some(msg) = framing::read_message(&mut reader)? {
@@ -149,6 +154,10 @@ fn on_initialize(shared: &Shared, input: &mut Input, params: &Value) {
             .unwrap_or(false)
     };
     input.document_changes = capability("/workspace/workspaceEdit/documentChanges");
+    input.workspace_snippets =
+        input.document_changes && capability("/workspace/workspaceEdit/snippetEditSupport");
+    input.completion_snippets =
+        capability("/textDocument/completion/completionItem/snippetSupport");
     if shared.config.abbreviations {
         if capability("/workspace/applyEdit") {
             input.abbreviations = Some(Table::load());
@@ -204,7 +213,7 @@ fn abbreviation_completion(shared: &Shared, input: &Input, params: &Value) -> Op
     let uri = text_document_uri(params)?;
     let position = Position::from_json(params.get("position")?)?;
     let doc = shared.state().documents.get(uri)?.clone();
-    completion::at(table, &doc, position)
+    completion::at(table, &doc, position, input.completion_snippets)
 }
 
 /// The `workspace/applyEdit` params replacing a just-finished `\abbreviation`.
@@ -217,12 +226,13 @@ fn abbreviation_edit(shared: &Shared, input: &Input, params: &Value) -> Option<V
     let table = input.abbreviations.as_ref()?;
     let doc = state.documents.get(uri)?;
     let replacement = abbrev::check(table, doc, &insertion)?;
-    let edit = json!({
-        "range": lsp::range(replacement.start, replacement.end),
-        "newText": replacement.text,
-    });
+    let range = lsp::range(replacement.start, replacement.end);
+    let edit = match replacement.snippet.filter(|_| input.workspace_snippets) {
+        Some(snippet) => json!({"range": range, "snippet": {"kind": "snippet", "value": snippet}}),
+        None => json!({"range": range, "newText": replacement.text}),
+    };
     let edit = if input.document_changes {
-        // Versioned, so Zed maps the range even if more was typed meanwhile.
+        // Include the source version so the client can validate/map the edit.
         json!({"documentChanges": [{
             "textDocument": {"uri": uri, "version": doc.version},
             "edits": [edit],

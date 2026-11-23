@@ -21,6 +21,7 @@ pub struct Replacement {
     pub start: Position,
     pub end: Position,
     pub text: String,
+    pub snippet: Option<String>,
 }
 
 /// Checks an insertion into `text` (the document after the insertion).
@@ -61,7 +62,8 @@ pub fn check(table: &Table, doc: &Document, insertion: &Insertion) -> Option<Rep
     Some(Replacement {
         start: position(backslash),
         end: position(until),
-        text: symbol.to_owned(),
+        text: symbol.text.clone(),
+        snippet: symbol.snippet.clone(),
     })
 }
 
@@ -105,6 +107,7 @@ mod tests {
                 character: end,
             },
             text: text.to_owned(),
+            snippet: None,
         })
     }
 

@@ -25,7 +25,8 @@ lean --version
 - Abbreviations turn into symbols as you type: `\R` and a space gives `ℝ`, `\alpha` gives `α` right away. Turn off with `"abbreviations": false`.
 - Ending a partial abbreviation chooses the shortest matching abbreviation: `\alp` followed by a space gives `α` and keeps the space. Other characters that cannot continue the abbreviation, including punctuation and newlines, also finish it and are kept. Exact matches take priority; equal-length matches use lexical order.
 - To convert without adding whitespace, accept the Unicode completion suggestion with Tab using Zed's default key bindings. The proxy offers the same shortest match as a completion, such as `\alp` → `α` or `\R` → `ℝ`. If the suggestion is hidden, run `editor: show completions` first. When no completion is shown, Tab follows Zed's normal indentation/keymap behavior; the proxy cannot distinguish spaces inserted by Tab from manually inserted spaces.
-- Automatic abbreviation input requires the proxy (`"infoview": true`). Bracket abbreviations such as `\<>` insert both delimiters (`⟨⟩`) without placing the cursor inside.
+- Paired abbreviations place the cursor between the delimiters: `\<>` → `⟨│⟩`, `\[[]]` → `⟦│⟧`, `\f<<>>` → `«│»`, and `\norm` → `‖│‖` (`│` marks the cursor). This also works when a space ends a partial abbreviation or Tab accepts a completion. A terminating space is kept after the closing delimiter. Other pairs, including `\floor`, `\ceil`, and `\{}`, also support cursor placement. Clients without snippet support insert plain text instead.
+- Automatic abbreviation input requires the proxy (`"infoview": true`).
 - For optional declaration and block templates, see [Optional snippets](#optional-snippets).
 
 ### Declaration status
