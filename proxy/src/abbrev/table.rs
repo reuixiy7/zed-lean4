@@ -29,8 +29,25 @@ impl Table {
         }
     }
 
+    #[cfg(test)]
     pub fn get(&self, abbr: &str) -> Option<&str> {
         self.map.get(abbr).map(String::as_str)
+    }
+
+    /// The shortest abbreviation starting with `prefix`; ties use lexical order.
+    /// Empty prefixes never choose an arbitrary symbol.
+    pub fn shortest_completion(&self, prefix: &str) -> Option<(&str, &str)> {
+        if prefix.is_empty() {
+            return None;
+        }
+        if let Some((abbr, symbol)) = self.map.get_key_value(prefix) {
+            return Some((abbr.as_str(), symbol.as_str()));
+        }
+        self.map
+            .range::<str, _>((Bound::Included(prefix), Bound::Unbounded))
+            .take_while(|(abbr, _)| abbr.starts_with(prefix))
+            .min_by_key(|(abbr, _)| abbr.len())
+            .map(|(abbr, symbol)| (abbr.as_str(), symbol.as_str()))
     }
 
     /// Whether some abbreviation starts with `s` (the empty string is a prefix of all).
@@ -76,5 +93,24 @@ mod tests {
         assert!(table.is_complete("Rat"));
         assert!(table.is_complete("alpha"));
         assert!(!table.is_complete("alp"));
+    }
+
+    #[test]
+    fn shortest_completion_prefers_exact_then_shortest_then_lexical_order() {
+        let table = Table::from_pairs(&[
+            ("R", "ℝ"),
+            ("Rat", "ℚ"),
+            ("Real", "ℝ"),
+            ("alpine", "longer"),
+            ("alpha", "α"),
+            ("ax", "first"),
+            ("ay", "second"),
+        ]);
+        assert_eq!(table.shortest_completion("R"), Some(("R", "ℝ")));
+        assert_eq!(table.shortest_completion("Ra"), Some(("Rat", "ℚ")));
+        assert_eq!(table.shortest_completion("alp"), Some(("alpha", "α")));
+        assert_eq!(table.shortest_completion("a"), Some(("ax", "first")));
+        assert_eq!(table.shortest_completion(""), None);
+        assert_eq!(table.shortest_completion("unknown"), None);
     }
 }

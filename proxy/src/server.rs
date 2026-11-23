@@ -3,6 +3,7 @@
 //! Every message is forwarded except responses to the proxy's own requests (routed
 //! to their consumer) and hover responses held back to merge in the tactic state.
 
+use crate::abbrev::completion;
 use crate::framing;
 use crate::hover::{self, HoverWait};
 use crate::lsp::{Diagnostic, text_document_uri};
@@ -15,7 +16,20 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
     let mut reader = BufReader::new(input);
     while let Some(msg) = framing::read_message(&mut reader)? {
         if let Some(id) = msg.response_id() {
-            let pending = shared.state().pending.remove(&id);
+            let (initialize, pending) = {
+                let mut state = shared.state();
+                let initialize = state
+                    .initialize_request
+                    .take_if(|request| *request == id)
+                    .is_some();
+                (initialize, state.pending.remove(&id))
+            };
+            if initialize {
+                let mut response = msg.value();
+                completion::announce(&mut response);
+                shared.send_client(&response);
+                continue;
+            }
             if let Some(pending) = pending {
                 let result = match msg.value() {
                     Value::Object(mut response) => response.remove("result"),

@@ -1,10 +1,11 @@
 //! Zed → Lean direction.
 //!
-//! Every message is forwarded; the few the infoview needs are also inspected.
-//! Responses to the proxy's own requests to Zed are dropped.
+//! Most messages are forwarded; the few the infoview needs are also inspected.
+//! Unicode completions are answered locally, and responses to the proxy's own
+//! requests to Zed are dropped.
 
-use crate::abbrev::{self, Table};
-use crate::lsp::{self, Cursor, Position, text_document_uri};
+use crate::abbrev::{self, Table, completion};
+use crate::lsp::{self, Cursor, Position, RequestId, text_document_uri};
 use crate::shared::{Event, Shared, log};
 use crate::{framing, hover, status, uri};
 use serde_json::{Value, json};
@@ -48,6 +49,9 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
         match method {
             "initialize" => {
                 on_initialize(shared, &mut input, params);
+                if input.abbreviations.is_some() {
+                    shared.state().initialize_request = msg.request_id().map(RequestId::of);
+                }
                 if shared.config.status {
                     status::announce_silent(&mut value["params"]);
                     shared.send_server(&value);
@@ -99,6 +103,22 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
                     hover::start(shared, id, params);
                 }
             }
+            "textDocument/completion" => {
+                if let Some(id) = msg.request_id()
+                    && let Some(result) = abbreviation_completion(shared, &input, params)
+                {
+                    shared.send_client(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+                    continue;
+                }
+            }
+            "completionItem/resolve" => {
+                if let Some(id) = msg.request_id()
+                    && completion::is_ours(params)
+                {
+                    shared.send_client(&json!({"jsonrpc": "2.0", "id": id, "result": params}));
+                    continue;
+                }
+            }
             _ => {}
         }
         shared.write_server(msg.raw());
@@ -116,6 +136,7 @@ fn observed(shared: &Shared, method: &str) -> bool {
         | "textDocument/documentHighlight"
         | "textDocument/codeAction" => true,
         "textDocument/hover" => shared.config.hover,
+        "textDocument/completion" | "completionItem/resolve" => shared.config.abbreviations,
         _ => false,
     }
 }
@@ -176,6 +197,14 @@ fn track_cursor(shared: &Shared, params: &Value, position: &str) {
             shared.event(Event::Cursor);
         }
     }
+}
+
+fn abbreviation_completion(shared: &Shared, input: &Input, params: &Value) -> Option<Value> {
+    let table = input.abbreviations.as_ref()?;
+    let uri = text_document_uri(params)?;
+    let position = Position::from_json(params.get("position")?)?;
+    let doc = shared.state().documents.get(uri)?.clone();
+    completion::at(table, &doc, position)
 }
 
 /// The `workspace/applyEdit` params replacing a just-finished `\abbreviation`.

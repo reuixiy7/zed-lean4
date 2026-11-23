@@ -41,12 +41,19 @@ fn fake_server(input: impl Read + Send + 'static, mut output: PipeWriter) {
             };
             let result = match msg["method"].as_str() {
                 // Echoes the capability the proxy adds, so tests can see it arrived.
-                Some("initialize") => json!({"capabilities": {"hoverProvider": true},
+                Some("initialize") => json!({"capabilities": {"hoverProvider": true,
+                    "completionProvider": {"resolveProvider": true, "triggerCharacters": ["."]}},
                     "silent": msg.pointer("/params/capabilities/lean/silentDiagnosticSupport")}),
                 Some("$/lean/plainGoal") => json!({"goals": ["x : Nat\n⊢ x = x"], "rendered": ""}),
                 Some("$/lean/plainTermGoal") => json!({"goal": "x = x", "range": {}}),
                 Some("textDocument/hover") => {
                     json!({"contents": {"kind": "markdown", "value": "HOVER"}})
+                }
+                Some("textDocument/completion") => json!([{"label": "nativeLeanCompletion"}]),
+                Some("completionItem/resolve") => {
+                    let mut item = msg["params"].clone();
+                    item["detail"] = json!("resolved by Lean");
+                    item
                 }
                 _ => Value::Null,
             };
@@ -210,6 +217,137 @@ fn expands_abbreviation_with_apply_edit() {
     assert_eq!(change["edits"][0]["newText"], "ℝ");
     assert_eq!(change["edits"][0]["range"]["start"]["character"], 4);
     assert_eq!(change["edits"][0]["range"]["end"]["character"], 6);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn finishes_partial_abbreviations_with_a_versioned_edit() {
+    let dir = temp_dir("abbrev-prefix");
+    let mut config = Config::new(dir.join("infoview.md"));
+    config.auto_open = false;
+    let mut proxy = Proxy::start(config);
+    let uri = "file:///tmp/Prefix.lean";
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {
+            "workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}}}}),
+        json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "lean4", "version": 1, "text": "x : \\alp"}}}),
+        json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{
+                "range": {"start": {"line": 0, "character": 8}, "end": {"line": 0, "character": 8}},
+                "text": " "
+            }]
+        }}),
+    ]);
+    let received = proxy.receive_until(|r| r.iter().any(|m| m["method"] == "workspace/applyEdit"));
+    let edit = received
+        .iter()
+        .find(|m| m["method"] == "workspace/applyEdit")
+        .unwrap();
+    let change = &edit["params"]["edit"]["documentChanges"][0];
+    assert_eq!(change["textDocument"]["version"], 2);
+    assert_eq!(
+        change["edits"][0],
+        json!({
+            "range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 8}},
+            "newText": "α"
+        })
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn offers_unicode_completions_and_keeps_lean_completions_working() {
+    let dir = temp_dir("abbrev-completion");
+    let mut config = Config::new(dir.join("infoview.md"));
+    config.auto_open = false;
+    let mut proxy = Proxy::start(config);
+    let uri = "file:///tmp/Completion.lean";
+    let complete = |id: i64, line: u64, character: u64| {
+        json!({
+            "jsonrpc": "2.0", "id": id, "method": "textDocument/completion", "params": {
+                "textDocument": {"uri": uri}, "position": {"line": line, "character": character}
+            }
+        })
+    };
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {"workspace": {"applyEdit": true}}}}),
+        json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "lean4", "version": 1, "text": "def x := \\alp\n\\R"}}}),
+        complete(2, 0, 13),
+        complete(3, 1, 2),
+        complete(4, 0, 3),
+    ]);
+    let received = proxy.receive_until(|r| (1..=4).all(|id| r.iter().any(|m| m["id"] == id)));
+    let by_id = |id: i64| received.iter().find(|m| m["id"] == id).unwrap();
+    assert_eq!(
+        by_id(1)["result"]["capabilities"]["completionProvider"],
+        json!({
+            "resolveProvider": true, "triggerCharacters": [".", "\\"]
+        })
+    );
+    let item = &by_id(2)["result"]["items"][0];
+    assert_eq!(item["label"], "\\alpha");
+    assert_eq!(
+        item["textEdit"],
+        json!({
+            "range": {"start": {"line": 0, "character": 9}, "end": {"line": 0, "character": 13}},
+            "newText": "α"
+        })
+    );
+    assert_eq!(by_id(3)["result"]["items"][0]["textEdit"]["newText"], "ℝ");
+    assert_eq!(
+        by_id(4)["result"],
+        json!([{"label": "nativeLeanCompletion"}])
+    );
+
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 5, "method": "completionItem/resolve", "params": item}),
+        json!({"jsonrpc": "2.0", "id": 6, "method": "completionItem/resolve", "params": {
+            "label": "nativeLeanCompletion", "data": {"native": true}
+        }}),
+    ]);
+    let resolved = proxy.receive_until(|r| (5..=6).all(|id| r.iter().any(|m| m["id"] == id)));
+    assert_eq!(
+        resolved.iter().find(|m| m["id"] == 5).unwrap()["result"],
+        *item
+    );
+    assert_eq!(
+        resolved.iter().find(|m| m["id"] == 6).unwrap()["result"]["detail"],
+        "resolved by Lean"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn disabled_abbreviations_leave_completion_capabilities_and_requests_unchanged() {
+    let dir = temp_dir("abbrev-disabled");
+    let mut config = Config::new(dir.join("infoview.md"));
+    config.auto_open = false;
+    config.abbreviations = false;
+    let mut proxy = Proxy::start(config);
+    let uri = "file:///tmp/Disabled.lean";
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {"workspace": {"applyEdit": true}}}}),
+        json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "lean4", "version": 1, "text": "\\alp"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "textDocument/completion", "params": {
+            "textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}
+        }}),
+    ]);
+    let received = proxy.receive_until(|r| (1..=2).all(|id| r.iter().any(|m| m["id"] == id)));
+    assert_eq!(
+        received.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"]["completionProvider"],
+        json!({
+            "resolveProvider": true, "triggerCharacters": ["."]
+        })
+    );
+    assert_eq!(
+        received.iter().find(|m| m["id"] == 2).unwrap()["result"],
+        json!([{"label": "nativeLeanCompletion"}])
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

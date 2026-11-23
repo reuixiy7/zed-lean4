@@ -8,7 +8,7 @@
 //!   a Markdown file meant to be shown in Zed's Markdown preview;
 //! - optionally appends the tactic state to hover responses;
 //! - optionally asks Zed to open the infoview file via `window/showDocument`;
-//! - expands Unicode abbreviations (`\R` → `ℝ`) as you type via `workspace/applyEdit`;
+//! - expands Unicode abbreviations (`\R` → `ℝ`) via `workspace/applyEdit` and completions;
 //! - optionally marks declarations as proved (✅), using `sorry` (⚠️) or failing (❌).
 //!
 //! Modules:

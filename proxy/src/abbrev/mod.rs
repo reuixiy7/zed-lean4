@@ -3,11 +3,12 @@
 //! After each typed insertion the text between the nearest `\` and the cursor is
 //! checked against the [`Table`]:
 //! - it is a complete abbreviation that nothing else extends (`\alpha`) → replace now;
-//! - it was a valid abbreviation and the new character no longer extends any
-//!   abbreviation (`\R` + space) → replace the abbreviation, keep the new character.
+//! - the new character no longer extends any abbreviation (`\alp` + space) →
+//!   choose the shortest matching abbreviation, keeping the new character.
 //!
 //! The replacement is sent to Zed as a `workspace/applyEdit` request.
 
+pub(crate) mod completion;
 mod table;
 
 pub use table::Table;
@@ -24,13 +25,11 @@ pub struct Replacement {
 
 /// Checks an insertion into `text` (the document after the insertion).
 pub fn check(table: &Table, doc: &Document, insertion: &Insertion) -> Option<Replacement> {
-    if insertion.text.contains('\n') {
-        return None;
-    }
+    let first_line = insertion.text.split(['\r', '\n']).next()?;
     let line = doc.line(insertion.start.line);
     let start = column_offset(line, insertion.start.character);
-    let end = start + insertion.text.len();
-    if line.get(start..end) != Some(insertion.text.as_str()) {
+    let end = start + first_line.len();
+    if line.get(start..end) != Some(first_line) {
         return None;
     }
 
@@ -47,9 +46,10 @@ pub fn check(table: &Table, doc: &Document, insertion: &Insertion) -> Option<Rep
     };
     let typed = &line[backslash + 1..end];
 
-    let (abbreviation, until) = if !insertion.text.contains('\\') && table.is_prefix(typed) {
+    let (abbreviation, until) = if !first_line.contains('\\') && table.is_prefix(typed) {
         // Still typing; replace early only when nothing longer can follow.
-        if !table.is_complete(typed) {
+        // A newline also ends the abbreviation, preserving the inserted line break.
+        if first_line.len() == insertion.text.len() && !table.is_complete(typed) {
             return None;
         }
         (typed, end)
@@ -57,10 +57,11 @@ pub fn check(table: &Table, doc: &Document, insertion: &Insertion) -> Option<Rep
         // The new text ended the abbreviation; keep it.
         (typed_before, start)
     };
+    let (_, symbol) = table.shortest_completion(abbreviation)?;
     Some(Replacement {
         start: position(backslash),
         end: position(until),
-        text: table.get(abbreviation)?.to_owned(),
+        text: symbol.to_owned(),
     })
 }
 
@@ -119,6 +120,21 @@ mod tests {
         assert_eq!(typing("x : \\R", " "), rep(4, 6, "ℝ"));
         assert_eq!(typing("(x : \\R", ")"), rep(5, 7, "ℝ"));
         assert_eq!(typing("\\to", " "), rep(0, 3, "→"));
+    }
+
+    #[test]
+    fn finishes_prefixes_without_removing_the_terminator() {
+        assert_eq!(typing("\\alp", " "), rep(0, 4, "α"));
+        assert_eq!(typing("\\alp", ")"), rep(0, 4, "α"));
+        assert_eq!(typing("\\alp", "7"), rep(0, 4, "α"));
+        assert_eq!(typing("\\alp", "  "), rep(0, 4, "α"));
+        assert_eq!(typing("\\alp", "\t"), rep(0, 4, "α"));
+        assert_eq!(typing("\\alp", "\n"), rep(0, 4, "α"));
+        assert_eq!(typing("\\alp", "\r\n"), rep(0, 4, "α"));
+        assert_eq!(typing("\\alph", "a\n  "), rep(0, 6, "α"));
+        assert_eq!(typing("\\Ra", " "), rep(0, 3, "ℚ"));
+        assert_eq!(typing("\\R", " "), rep(0, 2, "ℝ"));
+        assert_eq!(typing("\\", " "), None);
     }
 
     #[test]

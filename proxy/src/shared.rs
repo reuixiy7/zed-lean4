@@ -55,6 +55,8 @@ pub enum Event {
 
 #[derive(Default)]
 pub struct State {
+    /// Client initialization request whose reply needs proxy capabilities.
+    pub initialize_request: Option<RequestId>,
     /// Our requests to the server, by id.
     pub pending: HashMap<RequestId, Pending>,
     /// Our requests to the client; their responses are dropped.
