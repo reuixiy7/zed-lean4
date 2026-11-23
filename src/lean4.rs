@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 use zed_extension_api::{self as zed, Result, serde_json::Value, settings::LspSettings};
 
 /// GitHub repository whose releases carry the `lean-infoview-proxy` binaries.
-const PROXY_REPO: &str = "whoiam1101/zed-lean4";
+const PROXY_REPO: &str = "reuixiy7/zed-lean4";
 const PROXY_NAME: &str = "lean-infoview-proxy";
 /// The proxy release matching this extension, tagged `v<version>`.
 const PROXY_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));

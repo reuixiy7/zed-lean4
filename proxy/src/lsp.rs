@@ -24,6 +24,16 @@ impl RequestId {
     pub fn to_value(&self) -> Value {
         serde_json::from_str(&self.0).unwrap_or(Value::Null)
     }
+
+    /// Sequence number in the proxy's reserved request-id namespace.
+    pub fn own_sequence(&self) -> Option<u64> {
+        self.0
+            .strip_prefix('"')?
+            .strip_prefix(OWN_ID_PREFIX)?
+            .strip_suffix('"')?
+            .parse()
+            .ok()
+    }
 }
 
 impl fmt::Debug for RequestId {
@@ -100,7 +110,7 @@ pub enum Severity {
 }
 
 impl Diagnostic {
-    pub fn from_json(value: &mut Value) -> Option<Self> {
+    pub fn from_json(value: &Value) -> Option<Self> {
         let start = Position::from_json(value.pointer("/range/start")?)?;
         let end_line = value.pointer("/range/end/line")?.as_u64()?;
         let severity = match value.get("severity").and_then(Value::as_u64) {
@@ -113,10 +123,7 @@ impl Diagnostic {
         let accomplished = value
             .as_object()
             .is_some_and(|d| lean_tags(d).any(|t| t == LEAN_TAG_GOALS_ACCOMPLISHED));
-        let message = match value.get_mut("message")?.take() {
-            Value::String(message) => message,
-            _ => return None,
-        };
+        let message = value.get("message")?.as_str()?.to_owned();
         Some(Self {
             severity,
             start,
@@ -162,9 +169,9 @@ mod tests {
 
     #[test]
     fn diagnostic_from_json() {
-        let mut d = json!({"severity": 2, "message": "m",
+        let d = json!({"severity": 2, "message": "m",
             "range": {"start": {"line": 1, "character": 2}, "end": {"line": 3, "character": 0}}});
-        let d = Diagnostic::from_json(&mut d).unwrap();
+        let d = Diagnostic::from_json(&d).unwrap();
         assert_eq!(d.severity, Severity::Warning);
         assert_eq!(
             d.start,

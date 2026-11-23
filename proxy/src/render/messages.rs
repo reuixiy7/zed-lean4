@@ -114,7 +114,7 @@ mod tests {
     use serde_json::json;
 
     fn diag(severity: u64, line: u64, end: u64, message: &str) -> Diagnostic {
-        Diagnostic::from_json(&mut json!({"severity": severity, "message": message,
+        Diagnostic::from_json(&json!({"severity": severity, "message": message,
                "range": {"start": {"line": line, "character": 2}, "end": {"line": end, "character": 0}}}))
         .unwrap()
     }
@@ -132,7 +132,7 @@ mod tests {
     }
 
     fn proved(line: u64) -> Diagnostic {
-        Diagnostic::from_json(&mut json!({"severity": 3, "message": "Goals accomplished!",
+        Diagnostic::from_json(&json!({"severity": 3, "message": "Goals accomplished!",
             "isSilent": true, "leanTags": [2],
             "range": {"start": {"line": line, "character": 0}, "end": {"line": line + 1, "character": 0}}}))
         .unwrap()

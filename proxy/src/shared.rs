@@ -32,7 +32,7 @@ pub enum Pending {
 
 /// Events for the goals worker.
 pub enum Event {
-    Cursor(Cursor),
+    Cursor,
     /// The document changed: request goals again.
     Changed {
         uri: String,
@@ -63,6 +63,39 @@ pub struct State {
     pub hovers: HashMap<RequestId, HoverWait>,
     /// Mirrors of the open documents.
     pub documents: Documents,
+    cursor: Option<Cursor>,
+    generation: u64,
+}
+
+/// Identifies a goal snapshot, including moves away and back to the same position.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GoalTarget {
+    pub cursor: Cursor,
+    version: Option<i64>,
+    generation: u64,
+}
+
+impl State {
+    pub fn set_cursor(&mut self, cursor: Option<Cursor>) -> bool {
+        if self.cursor == cursor {
+            return false;
+        }
+        self.cursor = cursor;
+        self.generation = self.generation.wrapping_add(1);
+        true
+    }
+
+    pub fn document_changed(&mut self, uri: &str) {
+        if self.cursor.as_ref().is_some_and(|c| c.uri == uri) {
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
+    pub fn document_closed(&mut self, uri: &str) {
+        if self.cursor.as_ref().is_some_and(|c| c.uri == uri) {
+            self.set_cursor(None);
+        }
+    }
 }
 
 type Out = Mutex<Box<dyn Write + Send>>;
@@ -98,6 +131,22 @@ impl Shared {
 
     pub fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn goal_target(&self) -> Option<GoalTarget> {
+        let state = self.state();
+        let cursor = state.cursor.clone()?;
+        Some(GoalTarget {
+            version: state.documents.get(&cursor.uri).map(|doc| doc.version),
+            cursor,
+            generation: state.generation,
+        })
+    }
+
+    /// Also recognizes cancelled requests without retaining an unbounded set of ids.
+    pub fn owns_request(&self, id: &RequestId) -> bool {
+        id.own_sequence()
+            .is_some_and(|n| n > 0 && n < self.next_id.load(Ordering::Relaxed))
     }
 
     pub fn write_client(&self, body: &[u8]) {

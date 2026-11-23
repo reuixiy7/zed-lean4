@@ -12,7 +12,7 @@ mod table;
 
 pub use table::Table;
 
-use crate::document::{Insertion, column_offset, line_range, utf16_len};
+use crate::document::{Document, Insertion, column_offset, utf16_len};
 use crate::lsp::Position;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,11 +23,11 @@ pub struct Replacement {
 }
 
 /// Checks an insertion into `text` (the document after the insertion).
-pub fn check(table: &Table, text: &str, insertion: &Insertion) -> Option<Replacement> {
+pub fn check(table: &Table, doc: &Document, insertion: &Insertion) -> Option<Replacement> {
     if insertion.text.contains('\n') {
         return None;
     }
-    let line = &text[line_range(text, insertion.start.line)];
+    let line = doc.line(insertion.start.line);
     let start = column_offset(line, insertion.start.character);
     let end = start + insertion.text.len();
     if line.get(start..end) != Some(insertion.text.as_str()) {
@@ -37,7 +37,7 @@ pub fn check(table: &Table, text: &str, insertion: &Insertion) -> Option<Replace
     let backslash = line[..start].rfind('\\')?;
     let typed_before = &line[backslash + 1..start];
     // Only continue an abbreviation that was valid before this keystroke.
-    if !table.is_prefix(typed_before) || inside_string(&line[..backslash]) {
+    if !table.is_prefix(typed_before) || !doc.allows_abbreviation(insertion.start.line, backslash) {
         return None;
     }
 
@@ -62,24 +62,6 @@ pub fn check(table: &Table, text: &str, insertion: &Insertion) -> Option<Replace
         end: position(until),
         text: table.get(abbreviation)?.to_owned(),
     })
-}
-
-/// Whether the end of `prefix` is inside a string literal (odd number of unescaped quotes).
-fn inside_string(prefix: &str) -> bool {
-    let mut inside = false;
-    let mut escaped = false;
-    for c in prefix.chars() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match c {
-            '\\' if inside => escaped = true,
-            '"' => inside = !inside,
-            _ => {}
-        }
-    }
-    inside
 }
 
 #[cfg(test)]
@@ -108,7 +90,7 @@ mod tests {
             },
             text: typed.to_owned(),
         };
-        check(&table(), &text, &insertion)
+        check(&table(), &Document::new(text, 1), &insertion)
     }
 
     fn rep(start: u64, end: u64, text: &str) -> Option<Replacement> {
@@ -168,5 +150,60 @@ mod tests {
         assert_eq!(typing("s := \"\\t", "\""), None);
         assert_eq!(typing("s := \"a\" ++ \\t", "o"), None);
         assert_eq!(typing("s := \"a\" \\to", " "), rep(9, 12, "→"));
+    }
+
+    fn after_prefix(prefix: &str, typed: &str) -> Option<Replacement> {
+        let insertion = Insertion {
+            start: Position {
+                line: prefix.bytes().filter(|&b| b == b'\n').count() as u64,
+                character: utf16_len(prefix.rsplit('\n').next().unwrap()),
+            },
+            text: typed.to_owned(),
+        };
+        check(
+            &table(),
+            &Document::new(format!("{prefix}{typed}"), 1),
+            &insertion,
+        )
+    }
+
+    #[test]
+    fn preserves_multiline_raw_and_character_literals() {
+        for prefix in [
+            "def s := \"first\n\\t",
+            "def s := r#\"first\n\" \\t",
+            "def s := r##\"first\n\"# \\t",
+            "def c := '\\t",
+            "def s := s!\"first\n\\t",
+            "def s := s!\"{\"nested\"}\n\\t",
+        ] {
+            assert_eq!(after_prefix(prefix, " "), None, "{prefix}");
+        }
+    }
+
+    #[test]
+    fn comments_do_not_change_string_context() {
+        for prefix in [
+            "-- unmatched \"\nx : \\alph",
+            "/- \" /- nested -/ -/\nx : \\alph",
+            "-- math with a quote \" \\alph",
+            "/- math with a quote \"\n\\alph",
+            "def c := '\"'\nx : \\alph",
+            "def s := r##\"\"#\n\"##\nx : \\alph",
+            "theorem foo' : \\alph",
+        ] {
+            assert_eq!(after_prefix(prefix, "a").unwrap().text, "α", "{prefix}");
+        }
+    }
+
+    #[test]
+    fn expands_code_inside_interpolations_and_after_strings() {
+        for prefix in [
+            "def s := s!\"{(0 : \\alph",
+            "def s := s!\"{ { field := \"nested\" } }\"; \\alph",
+            "def s := \"line one\nline two\"\nx : \\alph",
+        ] {
+            assert_eq!(after_prefix(prefix, "a").unwrap().text, "α", "{prefix}");
+        }
     }
 }

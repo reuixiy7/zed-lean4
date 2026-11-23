@@ -53,20 +53,25 @@ Zed extensions can't add panels, so the infoview is a Markdown file shown in Zed
 Recommended settings for the user `settings.json` (Zed doesn't allow them in project settings, so they apply to all Markdown files):
 
 ```json
-{ "markdown_preview": { "open_markdown_files_in_preview": true, "limit_content_width": false } }
+{
+  "markdown_preview": {
+    "open_markdown_files_in_preview": true,
+    "limit_content_width": false
+  }
+}
 ```
 
 Settings in `lsp.lean4-lsp.settings`:
 
-| Setting | Default | |
-|---|---|---|
-| `infoview` | `true` | `false` runs `lake serve` without the proxy |
-| `infoview_file` | `.lake/infoview.md` | where to write the infoview |
-| `infoview_auto_open` | `true` | open the infoview the first time in a project |
-| `infoview_hover` | `true` | show goals in hover |
-| `abbreviations` | `true` | replace abbreviations as you type |
-| `declaration_status` | `true` | mark declarations ✅ / ⚠️ / ❌ |
-| `infoview_proxy_path` | | use a local build of the proxy (`cargo build -p lean-infoview-proxy --release`) |
+| Setting               | Default             |                                                                                 |
+| --------------------- | ------------------- | ------------------------------------------------------------------------------- |
+| `infoview`            | `true`              | `false` runs `lake serve` without the proxy                                     |
+| `infoview_file`       | `.lake/infoview.md` | where to write the infoview                                                     |
+| `infoview_auto_open`  | `true`              | open the infoview the first time in a project                                   |
+| `infoview_hover`      | `true`              | show goals in hover                                                             |
+| `abbreviations`       | `true`              | replace abbreviations as you type                                               |
+| `declaration_status`  | `true`              | mark declarations ✅ / ⚠️ / ❌                                                  |
+| `infoview_proxy_path` |                     | use a local build of the proxy (`cargo build -p lean-infoview-proxy --release`) |
 
 ### Nested Lean project
 
@@ -88,7 +93,12 @@ Settings in `lsp.lean4-lsp.settings`:
     "lean4-lsp": {
       "binary": {
         "path": "/path/to/your/.elan/bin/lake",
-        "arguments": ["--dir", "/path/to/your/worktree/formalization", "serve", "--"]
+        "arguments": [
+          "--dir",
+          "/path/to/your/worktree/formalization",
+          "serve",
+          "--"
+        ]
       },
       "settings": {
         "elan_auto_install": true,

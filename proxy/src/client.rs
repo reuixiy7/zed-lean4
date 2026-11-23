@@ -55,22 +55,43 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
                 }
             }
             "textDocument/didOpen" => {
-                shared.state().documents.open(params);
+                let mut state = shared.state();
+                state.documents.open(params);
+                if let Some(uri) = text_document_uri(params) {
+                    state.document_changed(uri);
+                    shared.event(Event::Changed {
+                        uri: uri.to_owned(),
+                    });
+                }
+                drop(state);
                 if std::mem::take(&mut input.show_infoview) {
                     show_infoview(shared);
                 }
             }
             "textDocument/didChange" => {
+                let edit = abbreviation_edit(shared, &input, params);
+                // Lean must see the edit before the worker refreshes its goals.
+                shared.write_server(msg.raw());
                 if let Some(uri) = text_document_uri(params) {
                     shared.event(Event::Changed {
                         uri: uri.to_owned(),
                     });
                 }
-                if let Some(edit) = abbreviation_edit(shared, &input, params) {
+                if let Some(edit) = edit {
                     shared.request_client("workspace/applyEdit", edit);
                 }
+                continue;
             }
-            "textDocument/didClose" => shared.state().documents.close(params),
+            "textDocument/didClose" => {
+                let mut state = shared.state();
+                state.documents.close(params);
+                if let Some(uri) = text_document_uri(params) {
+                    state.document_closed(uri);
+                    shared.event(Event::Changed {
+                        uri: uri.to_owned(),
+                    });
+                }
+            }
             "textDocument/documentHighlight" => track_cursor(shared, params, "/position"),
             "textDocument/codeAction" => track_cursor(shared, params, "/range/start"),
             "textDocument/hover" => {
@@ -147,21 +168,26 @@ fn track_cursor(shared: &Shared, params: &Value, position: &str) {
         text_document_uri(params),
         params.pointer(position).and_then(Position::from_json),
     ) {
-        shared.event(Event::Cursor(Cursor {
+        let changed = shared.state().set_cursor(Some(Cursor {
             uri: uri.to_owned(),
             pos,
         }));
+        if changed {
+            shared.event(Event::Cursor);
+        }
     }
 }
 
 /// The `workspace/applyEdit` params replacing a just-finished `\abbreviation`.
 fn abbreviation_edit(shared: &Shared, input: &Input, params: &Value) -> Option<Value> {
     let mut state = shared.state();
-    let insertion = state.documents.change(params)?;
-    let table = input.abbreviations.as_ref()?;
     let uri = text_document_uri(params)?;
+    let insertion = state.documents.change(params);
+    state.document_changed(uri);
+    let insertion = insertion?;
+    let table = input.abbreviations.as_ref()?;
     let doc = state.documents.get(uri)?;
-    let replacement = abbrev::check(table, &doc.text, &insertion)?;
+    let replacement = abbrev::check(table, doc, &insertion)?;
     let edit = json!({
         "range": lsp::range(replacement.start, replacement.end),
         "newText": replacement.text,

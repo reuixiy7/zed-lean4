@@ -81,12 +81,11 @@ mod tests {
     #[test]
     fn full_view() {
         let plain = json!({"goals": ["case succ\nn : Nat\n⊢ P (n + 1)", "case zero\n⊢ P 0"]});
-        let diags =
-            [
-                Diagnostic::from_json(&mut json!({"severity": 1, "message": "unsolved goals",
+        let diags = [
+            Diagnostic::from_json(&json!({"severity": 1, "message": "unsolved goals",
             "range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 3}}}))
-                .unwrap(),
-            ];
+            .unwrap(),
+        ];
         let md = render(&View {
             file: "A.lean",
             line: 2,

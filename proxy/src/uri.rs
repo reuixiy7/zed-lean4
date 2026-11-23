@@ -67,9 +67,10 @@ mod tests {
 
     #[test]
     fn roundtrip_unicode_and_spaces() {
-        let p = Path::new("/home/u/My Proj/Λ.lean");
-        let uri = from_path(p);
-        assert_eq!(uri, "file:///home/u/My%20Proj/%CE%9B.lean");
+        let p = std::env::temp_dir().join("My Proj/Λ.lean");
+        let uri = from_path(&p);
+        assert!(uri.starts_with("file:///"), "{uri}");
+        assert!(uri.ends_with("/My%20Proj/%CE%9B.lean"), "{uri}");
         assert_eq!(to_path(&uri).unwrap(), p);
     }
 

@@ -5,7 +5,7 @@
 //! and turns those into hints on the declaration name; with Zed's inline diagnostics
 //! every declaration then ends in ✅, ⚠️ (`sorry`) or ❌ (an error).
 
-use crate::document::{column_offset, line_range, utf16_len};
+use crate::document::{Document, column_offset, utf16_len};
 use crate::lsp::{LEAN_TAG_GOALS_ACCOMPLISHED, Position, lean_tags};
 use serde_json::{Map, Value, json};
 
@@ -34,16 +34,16 @@ fn object<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String,
     value.as_object_mut().expect("just made an object")
 }
 
-/// Rewrites `publishDiagnostics` params for display; `text` is the document, if known.
-pub fn decorate(params: &mut Value, text: Option<&str>) {
+/// Rewrites `publishDiagnostics` params using the matching document snapshot, if known.
+pub fn decorate(params: &mut Value, doc: Option<&Document>) {
     let Some(Value::Array(diagnostics)) = params.get_mut("diagnostics") else {
         return;
     };
-    diagnostics.retain_mut(|d| decorate_one(d, text));
+    diagnostics.retain_mut(|d| decorate_one(d, doc));
 }
 
 /// Returns whether to keep the diagnostic.
-fn decorate_one(d: &mut Value, text: Option<&str>) -> bool {
+fn decorate_one(d: &mut Value, doc: Option<&Document>) -> bool {
     let Some(d) = d.as_object_mut() else {
         return true;
     };
@@ -57,8 +57,8 @@ fn decorate_one(d: &mut Value, text: Option<&str>) -> bool {
         let start = d.get("range").and_then(|r| r.get("start"));
         if let Some(range) = start
             .and_then(Position::from_json)
-            .zip(text)
-            .and_then(|(start, text)| name_range(text, start))
+            .zip(doc)
+            .and_then(|(start, doc)| name_range(doc, start))
         {
             d.insert("range".into(), range);
         }
@@ -124,8 +124,8 @@ fn is_sorry(message: &str) -> bool {
 
 /// The range of the declaration name on the line of `start`, or of the keyword for
 /// `example` and anonymous instances.
-fn name_range(text: &str, start: Position) -> Option<Value> {
-    let line = &text[line_range(text, start.line)];
+fn name_range(doc: &Document, start: Position) -> Option<Value> {
+    let line = doc.line(start.line);
     let from = column_offset(line, start.character);
     let (keyword, after) =
         words(line, from).find(|&(w, _)| w == "example" || NAMED.contains(&w))?;
@@ -193,7 +193,7 @@ mod tests {
 
     fn decorated(diagnostics: Value, text: &str) -> Vec<Value> {
         let mut params = json!({"uri": "file:///A.lean", "diagnostics": diagnostics});
-        decorate(&mut params, Some(text));
+        decorate(&mut params, Some(&Document::new(text.to_owned(), 1)));
         params["diagnostics"].as_array().unwrap().clone()
     }
 
@@ -272,5 +272,21 @@ mod tests {
         assert_eq!(d[0]["message"], "⚠️ declaration uses `sorry`");
         assert_eq!(d[1]["message"], "❌ unsolved goals\n⊢ False");
         assert_eq!(d[2]["message"], "unused variable `x`");
+    }
+
+    #[test]
+    fn large_batches_find_names_in_any_diagnostic_order() {
+        let text: String = (0..1000)
+            .map(|i| format!("theorem t{i} : True := trivial\n"))
+            .collect();
+        let diagnostics = (0..1000).rev().map(proved).collect::<Vec<_>>();
+        let decorated = decorated(json!(diagnostics), &text);
+        for (i, d) in decorated.iter().enumerate() {
+            let line = 999 - i as u64;
+            assert_eq!(
+                d["range"],
+                range(line, 8, 9 + line.to_string().len() as u64)
+            );
+        }
     }
 }
