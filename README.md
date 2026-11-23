@@ -26,6 +26,7 @@ lean --version
 - Ending a partial abbreviation chooses the shortest matching abbreviation: `\alp` followed by a space gives `α` and keeps the space. Other characters that cannot continue the abbreviation, including punctuation and newlines, also finish it and are kept. Exact matches take priority; equal-length matches use lexical order.
 - To convert without adding whitespace, accept the Unicode completion suggestion with Tab using Zed's default key bindings. The proxy offers the same shortest match as a completion, such as `\alp` → `α` or `\R` → `ℝ`. If the suggestion is hidden, run `editor: show completions` first. When no completion is shown, Tab follows Zed's normal indentation/keymap behavior; the proxy cannot distinguish spaces inserted by Tab from manually inserted spaces.
 - Paired abbreviations place the cursor between the delimiters: `\<>` → `⟨│⟩`, `\[[]]` → `⟦│⟧`, `\f<<>>` → `«│»`, and `\norm` → `‖│‖` (`│` marks the cursor). This also works when a space ends a partial abbreviation or Tab accepts a completion. A terminating space is kept after the closing delimiter. Other pairs, including `\floor`, `\ceil`, and `\{}`, also support cursor placement. Clients without snippet support insert plain text instead.
+- Hover a Unicode symbol to see all abbreviations that produce it, such as `\R`, `\br`, `\bbR`, `\Real`, and `\real` for `ℝ`. Multi-character symbols such as `→ₗ` are matched as a whole. Input hints appear alongside Lean's documentation and any tactic state, and also work when Lean has no hover text. They follow the `abbreviations` setting; `infoview_hover` only controls the tactic state.
 - Automatic abbreviation input requires the proxy (`"infoview": true`).
 - For optional declaration and block templates, see [Optional snippets](#optional-snippets).
 
@@ -73,7 +74,7 @@ Settings in `lsp.lean4-lsp.settings`:
 | `infoview_file`       | `.lake/infoview.md` | where to write the infoview                                                     |
 | `infoview_auto_open`  | `true`              | open the infoview the first time in a project                                   |
 | `infoview_hover`      | `true`              | show goals in hover                                                             |
-| `abbreviations`       | `true`              | replace abbreviations as you type                                               |
+| `abbreviations`       | `true`              | Unicode input, completions, and abbreviation hints on hover                      |
 | `declaration_status`  | `true`              | mark declarations ✅ / ⚠️ / ❌                                                  |
 | `infoview_proxy_path` |                     | use a local build of the proxy (`cargo build -p lean-infoview-proxy --release`) |
 

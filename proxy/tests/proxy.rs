@@ -47,7 +47,11 @@ fn fake_server(input: impl Read + Send + 'static, mut output: PipeWriter) {
                 Some("$/lean/plainGoal") => json!({"goals": ["x : Nat\n⊢ x = x"], "rendered": ""}),
                 Some("$/lean/plainTermGoal") => json!({"goal": "x = x", "range": {}}),
                 Some("textDocument/hover") => {
-                    json!({"contents": {"kind": "markdown", "value": "HOVER"}})
+                    if msg.pointer("/params/position/line") == Some(&json!(1)) {
+                        Value::Null
+                    } else {
+                        json!({"contents": {"kind": "markdown", "value": "HOVER"}})
+                    }
                 }
                 Some("textDocument/completion") => json!([{"label": "nativeLeanCompletion"}]),
                 Some("completionItem/resolve") => {
@@ -179,6 +183,69 @@ fn proxies_tracks_cursor_and_writes_goals() {
     // The expected type equals the goal target, so it is not repeated.
     assert!(!text.contains("Expected type"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unicode_hover_hints_preserve_native_content_and_respect_feature_switches() {
+    for (index, (abbreviations, goals)) in
+        [(true, true), (true, false), (false, true), (false, false)]
+            .into_iter()
+            .enumerate()
+    {
+        let dir = temp_dir(&format!("unicode-hover-{index}"));
+        let mut config = Config::new(dir.join("infoview.md"));
+        config.auto_open = false;
+        config.abbreviations = abbreviations;
+        config.hover = goals;
+        let mut proxy = Proxy::start(config);
+        let uri = "file:///tmp/Hover.lean";
+        let hover = |id, line, character| {
+            json!({"jsonrpc": "2.0", "id": id, "method": "textDocument/hover", "params": {
+                "textDocument": {"uri": uri}, "position": {"line": line, "character": character}
+            }})
+        };
+        proxy.send([
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "capabilities": {"workspace": {"applyEdit": true}}
+            }}),
+            json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                "uri": uri, "languageId": "lean4", "version": 1, "text": "variable (x : ℝ)\n→ₗ\nNat"
+            }}}),
+            hover(2, 0, 14),
+            hover(3, 1, 0),
+            hover(4, 1, 1),
+            hover(5, 2, 0),
+        ]);
+        let received = proxy.receive_until(|r| (2..=5).all(|id| r.iter().any(|m| m["id"] == id)));
+        let result = |id: i64| &received.iter().find(|m| m["id"] == id).unwrap()["result"];
+        let real = result(2)["contents"]["value"].as_str().unwrap();
+        assert!(real.starts_with("HOVER"));
+        assert_eq!(real.contains("Unicode input"), abbreviations);
+        assert_eq!(real.contains("Tactic state"), goals);
+        if abbreviations {
+            assert!(real.contains("\\R"));
+            assert!(real.contains("\\Real"));
+        }
+        for id in [3, 4] {
+            if abbreviations {
+                let symbol = result(id);
+                let text = symbol["contents"]["value"].as_str().unwrap();
+                assert!(text.contains("→ₗ"));
+                assert!(text.contains("\\linearmap"));
+                assert_eq!(text.contains("Tactic state"), goals);
+                assert_eq!(
+                    symbol["range"],
+                    json!({"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 2}})
+                );
+            } else {
+                assert!(result(id).is_null(), "native empty hover remains empty");
+            }
+        }
+        let ordinary = result(5)["contents"]["value"].as_str().unwrap();
+        assert!(ordinary.starts_with("HOVER"));
+        assert!(!ordinary.contains("Unicode input"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[test]

@@ -9,6 +9,7 @@
 //! - optionally appends the tactic state to hover responses;
 //! - optionally asks Zed to open the infoview file via `window/showDocument`;
 //! - expands Unicode abbreviations (`\R` → `ℝ`) via `workspace/applyEdit` and completions;
+//! - shows the available input abbreviations when hovering Unicode symbols;
 //! - optionally marks declarations as proved (✅), using `sorry` (⚠️) or failing (❌).
 //!
 //! Modules:
@@ -17,7 +18,7 @@
 //! - `shared`: output streams and the router for the proxy's own requests;
 //! - `client`: Zed → Lean direction (cursor, `initialize`, documents, abbreviations);
 //! - `server`: Lean → Zed direction (routing our responses, diagnostics, progress);
-//! - `hover`: merging the tactic state into hover responses;
+//! - `hover`: merging Unicode input hints and tactic state into hover responses;
 //! - `goals`: the worker that requests goals and writes the infoview file;
 //! - `render`: Markdown rendering;
 //! - `document`: mirrors of open documents (UTF-16 positions);

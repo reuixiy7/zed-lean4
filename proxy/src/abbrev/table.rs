@@ -4,7 +4,7 @@
 //! into snippets, alongside plain text fallbacks for clients without snippet support.
 
 use std::collections::BTreeMap;
-use std::ops::Bound;
+use std::ops::{Bound, Range};
 
 const ABBREVIATIONS: &str = include_str!("../../data/abbreviations.json");
 
@@ -47,27 +47,57 @@ fn escape_snippet(text: &str) -> String {
 
 pub struct Table {
     map: BTreeMap<String, Expansion>,
+    reverse: BTreeMap<String, Vec<String>>,
+    max_symbol_bytes: usize,
+}
+
+pub struct Symbol<'a> {
+    pub range: Range<usize>,
+    pub text: &'a str,
+    pub abbreviations: &'a [String],
 }
 
 impl Table {
     pub fn load() -> Self {
-        Self {
-            map: serde_json::from_str::<BTreeMap<String, String>>(ABBREVIATIONS)
+        Self::new(
+            serde_json::from_str::<BTreeMap<String, String>>(ABBREVIATIONS)
                 .expect("invalid embedded Lean abbreviation table")
                 .into_iter()
                 .map(|(abbr, value)| (abbr, Expansion::new(value)))
                 .collect(),
+        )
+    }
+
+    fn new(map: BTreeMap<String, Expansion>) -> Self {
+        let mut reverse: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (abbr, expansion) in &map {
+            // Do not clutter ordinary ASCII code with Unicode input hints.
+            if !expansion.text.is_ascii() {
+                reverse
+                    .entry(expansion.text.clone())
+                    .or_default()
+                    .push(abbr.clone());
+            }
+        }
+        for abbreviations in reverse.values_mut() {
+            abbreviations.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+        }
+        let max_symbol_bytes = reverse.keys().map(String::len).max().unwrap_or(0);
+        Self {
+            map,
+            reverse,
+            max_symbol_bytes,
         }
     }
 
     #[cfg(test)]
     pub fn from_pairs(pairs: &[(&str, &str)]) -> Self {
-        Self {
-            map: pairs
+        Self::new(
+            pairs
                 .iter()
                 .map(|(a, b)| (a.to_string(), Expansion::new(b.to_string())))
                 .collect(),
-        }
+        )
     }
 
     #[cfg(test)]
@@ -89,6 +119,39 @@ impl Table {
             .take_while(|(abbr, _)| abbr.starts_with(prefix))
             .min_by_key(|(abbr, _)| abbr.len())
             .map(|(abbr, symbol)| (abbr.as_str(), symbol))
+    }
+
+    /// Longest complete Unicode mapping covering the hovered character.
+    /// Inspect only a window bounded by the longest symbol, never the whole table.
+    pub fn symbol_at<'a>(&'a self, line: &str, byte: usize) -> Option<Symbol<'a>> {
+        if byte >= line.len() || !line.is_char_boundary(byte) {
+            return None;
+        }
+        let mut best: Option<Symbol<'_>> = None;
+        let first = byte.saturating_sub(self.max_symbol_bytes.saturating_sub(1));
+        for start in (first..=byte).filter(|&start| line.is_char_boundary(start)) {
+            let last = (start + self.max_symbol_bytes).min(line.len());
+            for end in (byte + 1..=last)
+                .rev()
+                .filter(|&end| line.is_char_boundary(end))
+            {
+                if best
+                    .as_ref()
+                    .is_some_and(|best| best.text.len() >= end - start)
+                {
+                    break;
+                }
+                if let Some((text, abbreviations)) = self.reverse.get_key_value(&line[start..end]) {
+                    best = Some(Symbol {
+                        range: start..end,
+                        text,
+                        abbreviations,
+                    });
+                    break;
+                }
+            }
+        }
+        best
     }
 
     /// Whether some abbreviation starts with `s` (the empty string is a prefix of all).
@@ -122,6 +185,41 @@ mod tests {
         assert_eq!(table.get("alpha"), Some("α"));
         assert_eq!(table.get("<>"), Some("⟨⟩"));
         assert_eq!(table.get("calc"), None);
+    }
+
+    #[test]
+    fn reverse_lookup_prefers_complete_symbols_and_lists_all_aliases() {
+        let table = Table::load();
+        for byte in [1, 4] {
+            let symbol = table.symbol_at(" →ₗ ", byte).unwrap();
+            assert_eq!(symbol.text, "→ₗ");
+            assert_eq!(symbol.range, 1..7);
+            assert_eq!(
+                symbol.abbreviations,
+                ["rl", "r_l", "tol", "to_l", "linearmap"]
+            );
+        }
+        let real = table.symbol_at("ℝ", 0).unwrap();
+        assert_eq!(real.abbreviations, ["R", "br", "bbR", "Real", "real"]);
+        let pair = table.symbol_at("⟨⟩", 0).unwrap();
+        assert!(pair.abbreviations.iter().any(|abbr| abbr == "<>"));
+        for (symbol, abbreviations) in &table.reverse {
+            for (byte, _) in symbol.char_indices() {
+                let found = table.symbol_at(symbol, byte).unwrap();
+                assert_eq!(found.text, symbol);
+                assert_eq!(found.abbreviations, abbreviations);
+            }
+        }
+        for (text, byte) in [
+            ("Nat", 0),
+            ("{}", 0),
+            ("ℝ ", 3),
+            ("ℝ", 1),
+            ("ℝ", 3),
+            ("", 0),
+        ] {
+            assert!(table.symbol_at(text, byte).is_none(), "{text}, {byte}");
+        }
     }
 
     #[test]

@@ -105,7 +105,7 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
             "textDocument/codeAction" => track_cursor(shared, params, "/range/start"),
             "textDocument/hover" => {
                 if let Some(id) = msg.request_id() {
-                    hover::start(shared, id, params);
+                    hover::start(shared, id, params, input.abbreviations.as_ref());
                 }
             }
             "textDocument/completion" => {
@@ -140,7 +140,7 @@ fn observed(shared: &Shared, method: &str) -> bool {
         | "textDocument/didClose"
         | "textDocument/documentHighlight"
         | "textDocument/codeAction" => true,
-        "textDocument/hover" => shared.config.hover,
+        "textDocument/hover" => shared.config.hover || shared.config.abbreviations,
         "textDocument/completion" | "completionItem/resolve" => shared.config.abbreviations,
         _ => false,
     }

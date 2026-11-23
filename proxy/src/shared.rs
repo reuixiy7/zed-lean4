@@ -3,7 +3,7 @@
 
 use crate::document::Documents;
 use crate::framing;
-use crate::hover::HoverWait;
+use crate::hover::Hover;
 use crate::lsp::{self, Cursor, Diagnostic, RequestId};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -61,8 +61,8 @@ pub struct State {
     pub pending: HashMap<RequestId, Pending>,
     /// Our requests to the client; their responses are dropped.
     pub client_pending: HashSet<RequestId>,
-    /// Client hover requests whose response is merged with a goal.
-    pub hovers: HashMap<RequestId, HoverWait>,
+    /// Client hover requests receiving goals and/or Unicode input hints.
+    pub hovers: HashMap<RequestId, Hover>,
     /// Mirrors of the open documents.
     pub documents: Documents,
     cursor: Option<Cursor>,
