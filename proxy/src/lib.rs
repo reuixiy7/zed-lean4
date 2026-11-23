@@ -52,6 +52,8 @@ use std::thread;
 
 pub struct Config {
     pub goals_file: PathBuf,
+    /// Generate the InfoView file and offer tactic-state hover.
+    pub infoview: bool,
     pub hover: bool,
     pub auto_open: bool,
     pub abbreviations: bool,
@@ -63,11 +65,16 @@ impl Config {
     pub fn new(goals_file: PathBuf) -> Self {
         Self {
             goals_file,
+            infoview: true,
             hover: true,
             auto_open: true,
             abbreviations: true,
             status: true,
         }
+    }
+
+    pub(crate) fn goal_hover(&self) -> bool {
+        self.infoview && self.hover
     }
 }
 
@@ -79,7 +86,9 @@ pub fn run(
     server_in: impl Write + Send + 'static,
     server_out: impl Read + Send + 'static,
 ) -> io::Result<()> {
-    goals::prepare(&config.goals_file);
+    if config.infoview {
+        goals::prepare(&config.goals_file);
+    }
 
     let (events_tx, events_rx) = mpsc::channel();
     let (hover_tx, hover_rx) = mpsc::channel();
@@ -95,8 +104,12 @@ pub fn run(
     spawn(&shared, move |s| {
         let _ = done_tx.send(server::forward(s, server_out));
     });
-    spawn(&shared, move |s| goals::worker(s, events_rx));
-    spawn(&shared, move |s| hover::timer(s, hover_rx));
+    if shared.config.infoview {
+        spawn(&shared, move |s| goals::worker(s, events_rx));
+    }
+    if shared.config.goal_hover() {
+        spawn(&shared, move |s| hover::timer(s, hover_rx));
+    }
 
     done_rx.recv().unwrap_or(Ok(()))
 }

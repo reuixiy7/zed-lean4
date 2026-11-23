@@ -1,9 +1,9 @@
 [package]
-name = "lean-infoview-proxy"
+name = "lean-proxy"
 version = "0.4.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "LSP proxy between Zed and the Lean server that renders an infoview"
+description = "LSP proxy for Zed with Lean InfoView, Unicode input, and declaration status"
 
 [dependencies]
 serde_json = "1"

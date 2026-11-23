@@ -1,5 +1,5 @@
-use lean_infoview_proxy::lsp::OWN_ID_PREFIX;
-use lean_infoview_proxy::{Config, framing, run};
+use lean_proxy::lsp::OWN_ID_PREFIX;
+use lean_proxy::{Config, framing, run};
 use serde_json::{Value, json};
 use std::io::{BufReader, PipeWriter, Read, pipe};
 use std::path::PathBuf;
@@ -111,7 +111,7 @@ impl Proxy {
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("lean-infoview-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lean-proxy-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -186,6 +186,195 @@ fn proxies_tracks_cursor_and_writes_goals() {
     assert!(text.contains("x : Nat\n⊢ x = x"), "{text}");
     // The expected type equals the goal target, so it is not repeated.
     assert!(!text.contains("Expected type"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn disabling_infoview_keeps_unicode_input_hovers_status_and_reference_available() {
+    const SHOW_ABBREVIATIONS: &str = "Lean 4: Show Unicode Input Abbreviations";
+    const OPEN_INFOVIEW: &str = "Lean 4: Open InfoView";
+    let dir = temp_dir("infoview-disabled");
+    let goals_file = dir.join(".lake/InfoView.md");
+    let mut config = Config::new(goals_file.clone());
+    config.infoview = false;
+    // Leave auto-open and goal hover at their defaults: neither may override the switch.
+    let (client_in, input) = pipe().unwrap();
+    let (client_out, output) = pipe().unwrap();
+    let (server_requests, server_in) = pipe().unwrap();
+    let (server_output, server_out) = pipe().unwrap();
+    let requests = messages(server_requests);
+    thread::spawn(move || run(config, client_in, output, server_in, server_output));
+    let mut proxy = Proxy {
+        input,
+        output: messages(client_out),
+    };
+    let mut server_out = server_out;
+    let uri = "file:///tmp/WithoutView.lean";
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "capabilities": {
+                "window": {"showDocument": {"support": true}},
+                "workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}
+            }
+        }}),
+        json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "lean4", "version": 1, "text": "theorem checked : True := by trivial\nℝ \\alp"
+        }}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "textDocument/documentHighlight", "params": {
+            "textDocument": {"uri": uri}, "position": {"line": 0, "character": 5}
+        }}),
+        json!({"jsonrpc": "2.0", "id": 3, "method": "textDocument/hover", "params": {
+            "textDocument": {"uri": uri}, "position": {"line": 1, "character": 0}
+        }}),
+        json!({"jsonrpc": "2.0", "id": 4, "method": "textDocument/completion", "params": {
+            "textDocument": {"uri": uri}, "position": {"line": 1, "character": 6}
+        }}),
+        execute_command(json!(5), OPEN_INFOVIEW),
+    ]);
+    // Reply only to the external hover and initialization, then use a normal
+    // request as a processing barrier. No worker goal request may be emitted.
+    let mut forwarded = Vec::new();
+    loop {
+        let request = requests.recv_timeout(TIMEOUT).unwrap();
+        let method = request["method"].as_str().unwrap();
+        forwarded.push(method.to_owned());
+        if method == "initialize" {
+            framing::write_message(&mut server_out, &json!({"jsonrpc": "2.0", "id": 1,
+                "result": {"capabilities": {"executeCommandProvider": {"commands": ["lean.original"]}}}
+            })).unwrap();
+        } else if method == "textDocument/hover" {
+            framing::write_message(
+                &mut server_out,
+                &json!({"jsonrpc": "2.0", "id": 3,
+                    "result": {"contents": {"kind": "markdown", "value": "Native hover"}}
+                }),
+            )
+            .unwrap();
+            break;
+        }
+    }
+    let diagnostics = json!({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+        "uri": uri, "version": 1, "diagnostics": [{
+            "range": {"start": {"line": 0, "character": 0}, "end": {"line": 1, "character": 0}},
+            "severity": 3, "isSilent": true, "leanTags": [2], "message": "Goals accomplished!"
+        }]
+    }});
+    framing::write_message(&mut server_out, &diagnostics).unwrap();
+    framing::write_message(
+        &mut server_out,
+        &json!({"jsonrpc": "2.0", "method": "$/lean/fileProgress",
+            "params": {"textDocument": {"uri": uri}, "processing": []}
+        }),
+    )
+    .unwrap();
+    let received = proxy.receive_until(|messages| {
+        [1, 3, 4, 5]
+            .iter()
+            .all(|id| messages.iter().any(|msg| msg["id"] == *id))
+            && messages
+                .iter()
+                .any(|msg| msg["method"] == "$/lean/fileProgress")
+    });
+    let by_id = |id| received.iter().find(|msg| msg["id"] == id).unwrap();
+    assert_eq!(
+        by_id(1)["result"]["capabilities"]["executeCommandProvider"]["commands"],
+        json!(["lean.original", SHOW_ABBREVIATIONS])
+    );
+    let hover = by_id(3)["result"]["contents"]["value"].as_str().unwrap();
+    assert!(
+        hover.contains("Native hover") && hover.contains("Unicode input"),
+        "{hover}"
+    );
+    assert!(!hover.contains('⊢'));
+    assert_eq!(by_id(4)["result"]["items"][0]["textEdit"]["newText"], "α");
+    assert!(
+        by_id(5)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("infoview.enabled")
+    );
+    let diagnostic = received
+        .iter()
+        .find(|msg| msg["method"] == "textDocument/publishDiagnostics")
+        .unwrap();
+    assert_eq!(
+        diagnostic["params"]["diagnostics"][0]["message"],
+        "✅ Goals accomplished"
+    );
+    assert!(
+        !received
+            .iter()
+            .any(|msg| msg["method"] == "window/showDocument")
+    );
+    assert!(!goals_file.exists());
+
+    proxy.send([
+        json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{
+                "range": {"start": {"line": 1, "character": 6}, "end": {"line": 1, "character": 6}},
+                "text": " "
+            }]
+        }}),
+    ]);
+    let edits = proxy.receive_until(|messages| {
+        messages
+            .iter()
+            .any(|msg| msg["method"] == "workspace/applyEdit")
+    });
+    let edit = edits
+        .iter()
+        .find(|msg| msg["method"] == "workspace/applyEdit")
+        .unwrap();
+    assert_eq!(
+        edit["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"],
+        "α"
+    );
+
+    // The reference command is independent of both goal queries and the view file.
+    proxy.send([execute_command(json!(6), SHOW_ABBREVIATIONS)]);
+    let reference = proxy.receive_until(|messages| {
+        messages
+            .iter()
+            .any(|msg| msg["method"] == "window/showDocument")
+    });
+    let open = reference
+        .iter()
+        .find(|msg| msg["method"] == "window/showDocument")
+        .unwrap();
+    assert!(
+        open["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .ends_with("/AbbreviationView.md")
+    );
+    proxy.send([
+        json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}}),
+        execute_command(json!(7), "lean.original"),
+    ]);
+    assert!(
+        proxy
+            .receive_until(|messages| messages.iter().any(|msg| msg["id"] == 6))
+            .iter()
+            .any(|msg| msg["id"] == 6 && msg.get("result").is_some())
+    );
+    loop {
+        let request = requests.recv_timeout(TIMEOUT).unwrap();
+        let method = request["method"].as_str().unwrap();
+        forwarded.push(method.to_owned());
+        if request["id"] == 7 {
+            break;
+        }
+    }
+    assert!(
+        !forwarded
+            .iter()
+            .any(|method| method.starts_with("$/lean/plain")),
+        "{forwarded:?}"
+    );
+    assert!(requests.recv_timeout(Duration::from_millis(250)).is_err());
+    assert!(!goals_file.exists());
+    assert!(!goals_file.with_extension("opened").exists());
+    assert!(dir.join(".lake/AbbreviationView.md").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

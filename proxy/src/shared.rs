@@ -184,7 +184,9 @@ impl Shared {
     }
 
     pub fn event(&self, event: Event) {
-        let _ = self.events.send(event);
+        if self.config.infoview {
+            let _ = self.events.send(event);
+        }
     }
 
     pub fn hover_deadline(&self, at: Instant, id: RequestId) {
@@ -243,5 +245,5 @@ fn write(out: &Out, body: &[u8], side: &str) {
 }
 
 pub fn log(msg: &str) {
-    eprintln!("[lean-infoview] {msg}");
+    eprintln!("[lean-proxy] {msg}");
 }

@@ -28,7 +28,7 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
                     completion::announce(&mut response);
                 }
                 if initialize.view_commands {
-                    commands::announce(&mut response);
+                    commands::announce(&mut response, shared.config.infoview);
                 }
                 shared.send_client(&response);
                 continue;
@@ -57,8 +57,14 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
 
         match msg.method() {
             Some("textDocument/publishDiagnostics") => {
+                if !shared.config.infoview && !shared.config.status {
+                    shared.write_client(msg.raw());
+                    continue;
+                }
                 let value = msg.value();
-                on_diagnostics(shared, &value);
+                if shared.config.infoview {
+                    on_diagnostics(shared, &value);
+                }
                 if shared.config.status {
                     shared.send_client(&decorated(shared, value));
                 } else {
@@ -67,7 +73,9 @@ pub fn forward(shared: &Shared, input: impl Read) -> io::Result<()> {
             }
             Some("$/lean/fileProgress") => {
                 shared.write_client(msg.raw());
-                on_file_progress(shared, &msg.value());
+                if shared.config.infoview {
+                    on_file_progress(shared, &msg.value());
+                }
             }
             _ => shared.write_client(msg.raw()),
         }

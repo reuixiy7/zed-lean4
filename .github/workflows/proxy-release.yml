@@ -1,6 +1,6 @@
-name: Build lean-infoview-proxy
+name: Build lean-proxy
 
-# Attaches `lean-infoview-proxy-<arch>-<os>.{tar.gz,zip}` to the GitHub release of the tag.
+# Attaches `lean-proxy-<arch>-<os>.{tar.gz,zip}` to the GitHub release of the tag.
 # The extension (src/lean4.rs, download_proxy) downloads these assets by name.
 
 on:
@@ -37,24 +37,24 @@ jobs:
 
       - name: Test
         if: "!contains(matrix.target, 'x86_64-apple')"
-        run: cargo test -p lean-infoview-proxy --target ${{ matrix.target }}
+        run: cargo test -p lean-proxy --target ${{ matrix.target }}
 
       - name: Build
-        run: cargo build -p lean-infoview-proxy --release --target ${{ matrix.target }}
+        run: cargo build -p lean-proxy --release --target ${{ matrix.target }}
 
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
-        run: tar -czf lean-infoview-proxy-${{ matrix.asset }}.tar.gz -C target/${{ matrix.target }}/release lean-infoview-proxy
+        run: tar -czf lean-proxy-${{ matrix.asset }}.tar.gz -C target/${{ matrix.target }}/release lean-proxy
 
       - name: Package (zip)
         if: matrix.archive == 'zip'
         shell: pwsh
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/lean-infoview-proxy.exe -DestinationPath lean-infoview-proxy-${{ matrix.asset }}.zip
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/lean-proxy.exe -DestinationPath lean-proxy-${{ matrix.asset }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lean-infoview-proxy-${{ matrix.asset }}
-          path: lean-infoview-proxy-${{ matrix.asset }}.${{ matrix.archive }}
+          name: lean-proxy-${{ matrix.asset }}
+          path: lean-proxy-${{ matrix.asset }}.${{ matrix.archive }}
 
   release:
     needs: build

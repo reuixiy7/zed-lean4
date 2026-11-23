@@ -37,6 +37,6 @@ jobs:
         uses: huacnlee/zed-extension-action@v2
         with:
           extension-name: lean4
-          push-to: owlx56/extensions
+          push-to: reuixiy7/extensions
         env:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}

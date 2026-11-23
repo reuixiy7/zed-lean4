@@ -3,8 +3,8 @@ name = "Lean 4"
 description = "Lean 4 support."
 version = "0.4.0"
 schema_version = 1
-authors = ["owlx56 <owlx365@gmail.com>"]
-repository = "https://github.com/owlx56/zed-lean4"
+authors = ["reuixiy7 <reuixiy7@gmail.com>"]
+repository = "https://github.com/reuixiy7/zed-lean4"
 snippets = "snippets/lean 4.json"
 
 [language_servers.lean4-lsp]

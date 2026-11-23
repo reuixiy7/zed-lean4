@@ -13,7 +13,7 @@ pub const OPEN_INFOVIEW: &str = "Lean 4: Open InfoView";
 const COMMANDS: [&str; 2] = [SHOW_ABBREVIATIONS, OPEN_INFOVIEW];
 
 /// Append our commands while preserving Lean's commands and provider options.
-pub fn announce(response: &mut Value) {
+pub fn announce(response: &mut Value, infoview: bool) {
     let Some(capabilities) = response
         .pointer_mut("/result/capabilities")
         .and_then(Value::as_object_mut)
@@ -29,6 +29,9 @@ pub fn announce(response: &mut Value) {
     let commands = provider.entry("commands").or_insert_with(|| json!([]));
     if let Some(commands) = commands.as_array_mut() {
         for command in COMMANDS {
+            if command == OPEN_INFOVIEW && !infoview {
+                continue;
+            }
             if !commands.iter().any(|existing| existing == command) {
                 commands.push(json!(command));
             }
@@ -51,6 +54,10 @@ pub fn execute(shared: &Shared, id: &Value, command: &str, show_document: bool) 
     }
     let path = match command {
         OPEN_INFOVIEW => {
+            if !shared.config.infoview {
+                fail(shared, id, "InfoView is disabled; enable infoview.enabled");
+                return;
+            }
             let path = &shared.config.goals_file;
             if let Err(error) = ensure_infoview(path) {
                 fail(
@@ -164,8 +171,8 @@ mod tests {
             if !provider.is_null() {
                 response["result"]["capabilities"]["executeCommandProvider"] = provider.clone();
             }
-            announce(&mut response);
-            announce(&mut response);
+            announce(&mut response, true);
+            announce(&mut response, true);
             let commands = response["result"]["capabilities"]["executeCommandProvider"]["commands"]
                 .as_array()
                 .unwrap();
@@ -182,7 +189,7 @@ mod tests {
             }
         }
         let mut failed = json!({"error": {"code": -32603}});
-        announce(&mut failed);
+        announce(&mut failed, true);
         assert!(failed.get("result").is_none());
     }
 }

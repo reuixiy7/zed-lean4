@@ -165,7 +165,7 @@ fn observed(shared: &Shared, method: &str) -> bool {
         | "textDocument/documentHighlight"
         | "textDocument/codeAction"
         | "workspace/executeCommand" => true,
-        "textDocument/hover" => shared.config.hover || shared.config.abbreviations,
+        "textDocument/hover" => shared.config.goal_hover() || shared.config.abbreviations,
         "textDocument/completion" | "completionItem/resolve" => shared.config.abbreviations,
         _ => false,
     }
@@ -191,7 +191,10 @@ fn on_initialize(shared: &Shared, input: &mut Input, params: &Value) {
             log("client does not support workspace/applyEdit; abbreviations are disabled");
         }
     }
-    if shared.config.auto_open && !commands::opened_marker(shared).exists() {
+    if shared.config.infoview
+        && shared.config.auto_open
+        && !commands::opened_marker(shared).exists()
+    {
         input.show_infoview = input.show_document;
         if !input.show_infoview {
             log("client does not support window/showDocument; open the infoview file manually");
@@ -200,6 +203,9 @@ fn on_initialize(shared: &Shared, input: &mut Input, params: &Value) {
 }
 
 fn track_cursor(shared: &Shared, params: &Value, position: &str) {
+    if !shared.config.infoview {
+        return;
+    }
     if let (Some(uri), Some(pos)) = (
         text_document_uri(params),
         params.pointer(position).and_then(Position::from_json),

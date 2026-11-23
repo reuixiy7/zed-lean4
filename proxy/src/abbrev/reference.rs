@@ -30,7 +30,7 @@ fn write(shared: &Shared, path: &std::path::Path) -> io::Result<()> {
         .is_some_and(|name| name.eq_ignore_ascii_case(FILE_NAME))
     {
         return Err(io::Error::other(
-            "the abbreviation reference and infoview have the same filename; change infoview_file",
+            "the abbreviation reference and infoview have the same filename; change infoview.file",
         ));
     }
     let text = markdown();

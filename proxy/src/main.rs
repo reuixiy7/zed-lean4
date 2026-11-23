@@ -1,9 +1,9 @@
-use lean_infoview_proxy::{Config, log, run};
+use lean_proxy::{Config, log, run};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
-const USAGE: &str = "usage: lean-infoview-proxy --goals-file <path> [--no-hover] [--no-auto-open] [--no-abbreviations] [--no-status] -- <server> [args...]";
+const USAGE: &str = "usage: lean-proxy --goals-file <path> [--no-infoview] [--no-hover] [--no-auto-open] [--no-abbreviations] [--no-status] -- <server> [args...]";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -14,13 +14,14 @@ fn main() -> ExitCode {
                 Some(path) => config.goals_file = PathBuf::from(path),
                 None => return usage("--goals-file needs a path"),
             },
+            Some("--no-infoview") => config.infoview = false,
             Some("--no-hover") => config.hover = false,
             Some("--no-auto-open") => config.auto_open = false,
             Some("--no-abbreviations") => config.abbreviations = false,
             Some("--no-status") => config.status = false,
             Some("--") => break,
             Some("--version") => {
-                println!("lean-infoview-proxy {}", env!("CARGO_PKG_VERSION"));
+                println!("lean-proxy {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
             }
             other => return usage(&format!("unexpected argument: {other:?}")),

@@ -1,20 +1,12 @@
 use std::{env, fs, path::PathBuf};
 use zed_extension_api::{self as zed, Result, serde_json::Value, settings::LspSettings};
 
-/// GitHub repository whose releases carry the `lean-infoview-proxy` binaries.
+/// GitHub repository whose releases carry the `lean-proxy` binaries.
 const PROXY_REPO: &str = "reuixiy7/zed-lean4";
-const PROXY_NAME: &str = "lean-infoview-proxy";
+const PROXY_NAME: &str = "lean-proxy";
 /// The proxy release matching this extension, tagged `v<version>`.
 const PROXY_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 const DEFAULT_INFOVIEW_FILE: &str = ".lake/InfoView.md";
-
-/// Proxy flags turned on by setting these to `false`.
-const PROXY_FLAGS: [(&str, &str); 4] = [
-    ("infoview_hover", "--no-hover"),
-    ("infoview_auto_open", "--no-auto-open"),
-    ("abbreviations", "--no-abbreviations"),
-    ("declaration_status", "--no-status"),
-];
 
 fn setting<'a>(settings: Option<&'a Value>, key: &str) -> Option<&'a Value> {
     settings.and_then(|settings| settings.get(key))
@@ -45,6 +37,24 @@ fn command(command: String, args: Vec<String>) -> zed::Command {
         args,
         env: vec![],
     }
+}
+
+/// Feature switches are separate from enabling or downloading the proxy itself.
+fn proxy_args(settings: Option<&Value>, goals_file: PathBuf) -> Vec<String> {
+    let infoview = setting(settings, "infoview");
+    let mut args = vec!["--goals-file".into(), path_string(goals_file)];
+    for (group, key, flag) in [
+        (infoview, "enabled", "--no-infoview"),
+        (infoview, "hover", "--no-hover"),
+        (infoview, "auto_open", "--no-auto-open"),
+        (settings, "abbreviations", "--no-abbreviations"),
+        (settings, "declaration_status", "--no-status"),
+    ] {
+        if !bool_setting(group, key, true) {
+            args.push(flag.into());
+        }
+    }
+    args
 }
 
 /// `name`, with `.exe` on Windows.
@@ -245,14 +255,14 @@ struct Lean4Extension {
 }
 
 impl Lean4Extension {
-    /// The infoview proxy: `infoview_proxy_path` setting, or the released binary.
+    /// An explicit local binary, a cached proxy, or an automatic release download.
     fn proxy_path(
         &mut self,
         language_server_id: &zed::LanguageServerId,
         settings: Option<&Value>,
         worktree: &zed::Worktree,
     ) -> Option<String> {
-        if let Some(path) = path_setting(settings, "infoview_proxy_path", worktree) {
+        if let Some(path) = path_setting(settings, "path", worktree) {
             return Some(path_string(path));
         }
         if let Some(path) = &self.cached_proxy_path
@@ -260,9 +270,13 @@ impl Lean4Extension {
         {
             return Some(path.clone());
         }
-        let path = download_proxy(language_server_id)
-            .ok()
-            .or_else(installed_proxy)?;
+        let path = if bool_setting(settings, "auto_download", true) {
+            download_proxy(language_server_id)
+                .ok()
+                .or_else(installed_proxy)
+        } else {
+            installed_proxy()
+        }?;
         self.cached_proxy_path = Some(path.clone());
         Some(path)
     }
@@ -285,24 +299,21 @@ impl zed::Extension for Lean4Extension {
 
         let lake = lake_command(language_server_id, worktree, binary, settings)?;
 
-        if !bool_setting(settings, "infoview", true) {
+        let proxy_settings = setting(settings, "proxy");
+        if !bool_setting(proxy_settings, "enabled", true) {
             return Ok(lake);
         }
-        let Some(proxy) = self.proxy_path(language_server_id, settings, worktree) else {
+        let Some(proxy) = self.proxy_path(language_server_id, proxy_settings, worktree) else {
             return Ok(lake);
         };
 
-        let goals_file = path_setting(settings, "infoview_file", worktree).unwrap_or_else(|| {
-            path_setting(settings, "lean_project_dir", worktree)
-                .unwrap_or_else(|| PathBuf::from(worktree.root_path()))
-                .join(DEFAULT_INFOVIEW_FILE)
-        });
-        let mut args = vec!["--goals-file".into(), path_string(goals_file)];
-        for (key, flag) in PROXY_FLAGS {
-            if !bool_setting(settings, key, true) {
-                args.push(flag.into());
-            }
-        }
+        let goals_file = path_setting(setting(settings, "infoview"), "file", worktree)
+            .unwrap_or_else(|| {
+                path_setting(settings, "lean_project_dir", worktree)
+                    .unwrap_or_else(|| PathBuf::from(worktree.root_path()))
+                    .join(DEFAULT_INFOVIEW_FILE)
+            });
+        let mut args = proxy_args(settings, goals_file);
         args.push("--".into());
         args.push(lake.command);
         args.extend(lake.args);
@@ -334,3 +345,41 @@ impl zed::Extension for Lean4Extension {
 }
 
 zed::register_extension!(Lean4Extension);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zed::serde_json::json;
+
+    #[test]
+    fn grouped_settings_only_disable_the_selected_features() {
+        let file = PathBuf::from("InfoView.md");
+        assert_eq!(
+            proxy_args(None, file.clone()),
+            ["--goals-file", "InfoView.md"]
+        );
+        assert_eq!(
+            proxy_args(Some(&json!({"infoview": {"enabled": false}})), file.clone()),
+            ["--goals-file", "InfoView.md", "--no-infoview"]
+        );
+        assert_eq!(
+            proxy_args(
+                Some(&json!({
+                    "proxy": {"enabled": false, "auto_download": false},
+                    "infoview": {"auto_open": false, "hover": false},
+                    "abbreviations": false,
+                    "declaration_status": false,
+                })),
+                file,
+            ),
+            [
+                "--goals-file",
+                "InfoView.md",
+                "--no-hover",
+                "--no-auto-open",
+                "--no-abbreviations",
+                "--no-status",
+            ]
+        );
+    }
+}

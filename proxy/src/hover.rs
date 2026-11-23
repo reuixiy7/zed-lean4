@@ -95,13 +95,14 @@ pub fn start(shared: &Shared, id: &Value, params: &Value, table: Option<&Table>)
         let position = params.get("position").and_then(Position::from_json)?;
         unicode_hint(table, doc, position)
     });
-    if !shared.config.hover && hint.is_none() {
+    let goal_hover = shared.config.goal_hover();
+    if !goal_hover && hint.is_none() {
         return;
     }
     state.hovers.insert(
         client_id.clone(),
         Hover {
-            waiting: if shared.config.hover {
+            waiting: if goal_hover {
                 HoverWait::Nothing
             } else {
                 HoverWait::Goal(Value::Null)
@@ -111,7 +112,7 @@ pub fn start(shared: &Shared, id: &Value, params: &Value, table: Option<&Table>)
         },
     );
     drop(state);
-    if !shared.config.hover {
+    if !goal_hover {
         return;
     }
     let params = json!({
