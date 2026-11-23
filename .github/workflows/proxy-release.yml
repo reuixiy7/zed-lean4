@@ -4,26 +4,97 @@ name: Build lean-proxy
 # The extension (src/lean4.rs, download_proxy) downloads these assets by name.
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release versions
+        shell: python
+        run: |
+          import os
+          import tomllib
+
+          versions = {}
+          for filename, keys in {
+              "extension.toml": ("version",),
+              "Cargo.toml": ("package", "version"),
+              "proxy/Cargo.toml": ("package", "version"),
+          }.items():
+              try:
+                  with open(filename, "rb") as manifest:
+                      version = tomllib.load(manifest)
+                  for key in keys:
+                      version = version[key]
+                  if not isinstance(version, str) or not version:
+                      raise ValueError("version must be a nonempty string")
+              except (OSError, ValueError, KeyError, TypeError) as error:
+                  raise SystemExit(f"::error file={filename}::Cannot read version: {error}")
+              versions[filename] = version
+              print(f"{filename}: {version}")
+
+          if len(set(versions.values())) != 1:
+              raise SystemExit("::error::Manifest versions do not match")
+
+          ref = os.environ["GITHUB_REF"]
+          if ref.startswith("refs/tags/"):
+              tag = ref.removeprefix("refs/tags/")
+              expected = f"v{versions['extension.toml']}"
+              if tag != expected:
+                  raise SystemExit(f"::error::Tag {tag} does not match {expected}")
+              print(f"Version check passed: {tag}")
+          else:
+              print("Manifest versions match; branch runs only build artifacts")
+
   build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, asset: x86_64-linux, archive: tar.gz }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, asset: aarch64-linux, archive: tar.gz }
-          - { os: macos-latest, target: x86_64-apple-darwin, asset: x86_64-macos, archive: tar.gz }
-          - { os: macos-latest, target: aarch64-apple-darwin, asset: aarch64-macos, archive: tar.gz }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: x86_64-windows, archive: zip }
-          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, asset: aarch64-windows, archive: zip }
+          - {
+              os: ubuntu-latest,
+              target: x86_64-unknown-linux-musl,
+              asset: x86_64-linux,
+              archive: tar.gz,
+            }
+          - {
+              os: ubuntu-24.04-arm,
+              target: aarch64-unknown-linux-musl,
+              asset: aarch64-linux,
+              archive: tar.gz,
+            }
+          - {
+              os: macos-latest,
+              target: x86_64-apple-darwin,
+              asset: x86_64-macos,
+              archive: tar.gz,
+            }
+          - {
+              os: macos-latest,
+              target: aarch64-apple-darwin,
+              asset: aarch64-macos,
+              archive: tar.gz,
+            }
+          - {
+              os: windows-latest,
+              target: x86_64-pc-windows-msvc,
+              asset: x86_64-windows,
+              archive: zip,
+            }
+          - {
+              os: windows-11-arm,
+              target: aarch64-pc-windows-msvc,
+              asset: aarch64-windows,
+              archive: zip,
+            }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +126,7 @@ jobs:
         with:
           name: lean-proxy-${{ matrix.asset }}
           path: lean-proxy-${{ matrix.asset }}.${{ matrix.archive }}
+          if-no-files-found: error
 
   release:
     needs: build

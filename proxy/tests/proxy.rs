@@ -1,7 +1,7 @@
 use lean_proxy::lsp::OWN_ID_PREFIX;
-use lean_proxy::{Config, framing, run};
-use serde_json::{Value, json};
-use std::io::{BufReader, PipeWriter, Read, pipe};
+use lean_proxy::{framing, run, Config};
+use serde_json::{json, Value};
+use std::io::{pipe, BufReader, PipeWriter, Read};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -153,12 +153,10 @@ fn proxies_tracks_cursor_and_writes_goals() {
         .iter()
         .find(|m| m["method"] == "window/showDocument")
         .expect("showDocument request");
-    assert!(
-        show["params"]["uri"]
-            .as_str()
-            .unwrap()
-            .ends_with("/.lake/InfoView.md")
-    );
+    assert!(show["params"]["uri"]
+        .as_str()
+        .unwrap()
+        .ends_with("/.lake/InfoView.md"));
     assert_eq!(show["params"]["takeFocus"], false);
 
     let by_id = |id: i64| {
@@ -287,12 +285,10 @@ fn disabling_infoview_keeps_unicode_input_hovers_status_and_reference_available(
     );
     assert!(!hover.contains('⊢'));
     assert_eq!(by_id(4)["result"]["items"][0]["textEdit"]["newText"], "α");
-    assert!(
-        by_id(5)["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("infoview.enabled")
-    );
+    assert!(by_id(5)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("infoview.enabled"));
     let diagnostic = received
         .iter()
         .find(|msg| msg["method"] == "textDocument/publishDiagnostics")
@@ -301,11 +297,9 @@ fn disabling_infoview_keeps_unicode_input_hovers_status_and_reference_available(
         diagnostic["params"]["diagnostics"][0]["message"],
         "✅ Goals accomplished"
     );
-    assert!(
-        !received
-            .iter()
-            .any(|msg| msg["method"] == "window/showDocument")
-    );
+    assert!(!received
+        .iter()
+        .any(|msg| msg["method"] == "window/showDocument"));
     assert!(!goals_file.exists());
 
     proxy.send([
@@ -341,22 +335,18 @@ fn disabling_infoview_keeps_unicode_input_hovers_status_and_reference_available(
         .iter()
         .find(|msg| msg["method"] == "window/showDocument")
         .unwrap();
-    assert!(
-        open["params"]["uri"]
-            .as_str()
-            .unwrap()
-            .ends_with("/AbbreviationView.md")
-    );
+    assert!(open["params"]["uri"]
+        .as_str()
+        .unwrap()
+        .ends_with("/AbbreviationView.md"));
     proxy.send([
         json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}}),
         execute_command(json!(7), "lean.original"),
     ]);
-    assert!(
-        proxy
-            .receive_until(|messages| messages.iter().any(|msg| msg["id"] == 6))
-            .iter()
-            .any(|msg| msg["id"] == 6 && msg.get("result").is_some())
-    );
+    assert!(proxy
+        .receive_until(|messages| messages.iter().any(|msg| msg["id"] == 6))
+        .iter()
+        .any(|msg| msg["id"] == 6 && msg.get("result").is_some()));
     loop {
         let request = requests.recv_timeout(TIMEOUT).unwrap();
         let method = request["method"].as_str().unwrap();
@@ -472,11 +462,9 @@ fn opens_infoview_on_command_without_auto_open_and_preserves_existing_goals() {
             capabilities["executeCommandProvider"]["commands"],
             json!(["lean.original", SHOW_ABBREVIATIONS, OPEN_INFOVIEW])
         );
-        assert!(
-            !initialized
-                .iter()
-                .any(|m| m["method"] == "window/showDocument")
-        );
+        assert!(!initialized
+            .iter()
+            .any(|m| m["method"] == "window/showDocument"));
         let goals = "## Goal\n\n```lean\nx : Nat\n⊢ x = x\n```\n";
         std::fs::write(&goals_file, goals).unwrap();
 
@@ -518,12 +506,10 @@ fn infoview_command_recreates_missing_files_and_reports_write_failures() {
             "capabilities": {"window": {"showDocument": {"support": true}}}
         }}),
     ]);
-    assert!(
-        proxy
-            .receive_until(|r| r.iter().any(|m| m["id"] == 1))
-            .iter()
-            .any(|m| m["id"] == 1)
-    );
+    assert!(proxy
+        .receive_until(|r| r.iter().any(|m| m["id"] == 1))
+        .iter()
+        .any(|m| m["id"] == 1));
     std::fs::remove_file(&goals_file).unwrap();
     proxy.send([execute_command(json!(2), OPEN_INFOVIEW)]);
     let requested = proxy.receive_until(|r| r.iter().any(|m| m["method"] == "window/showDocument"));
@@ -531,18 +517,14 @@ fn infoview_command_recreates_missing_files_and_reports_write_failures() {
         .iter()
         .find(|m| m["method"] == "window/showDocument")
         .unwrap();
-    assert!(
-        std::fs::read_to_string(&goals_file)
-            .unwrap()
-            .contains("Move the cursor inside a Lean file")
-    );
+    assert!(std::fs::read_to_string(&goals_file)
+        .unwrap()
+        .contains("Move the cursor inside a Lean file"));
     proxy.send([json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}})]);
-    assert!(
-        proxy
-            .receive_until(|r| r.iter().any(|m| m["id"] == 2))
-            .iter()
-            .any(|m| m["id"] == 2)
-    );
+    assert!(proxy
+        .receive_until(|r| r.iter().any(|m| m["id"] == 2))
+        .iter()
+        .any(|m| m["id"] == 2));
 
     std::fs::remove_file(&goals_file).unwrap();
     std::fs::create_dir(&goals_file).unwrap();
@@ -550,17 +532,13 @@ fn infoview_command_recreates_missing_files_and_reports_write_failures() {
     let received = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 3));
     let response = received.iter().find(|m| m["id"] == 3).unwrap();
     assert_eq!(response["error"]["code"], -32803);
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Cannot write")
-    );
-    assert!(
-        !received
-            .iter()
-            .any(|m| m["method"] == "window/showDocument")
-    );
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Cannot write"));
+    assert!(!received
+        .iter()
+        .any(|m| m["method"] == "window/showDocument"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -607,12 +585,10 @@ fn opens_the_complete_reference_on_demand_and_preserves_lean_commands() {
             .unwrap();
         assert_eq!(open["params"]["takeFocus"], true);
         assert_eq!(open["params"]["external"], false);
-        assert!(
-            open["params"]["uri"]
-                .as_str()
-                .unwrap()
-                .ends_with("/.lake/AbbreviationView.md")
-        );
+        assert!(open["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .ends_with("/.lake/AbbreviationView.md"));
         assert!(
             !requested.iter().any(|m| m["id"] == command_id),
             "wait for the open result"
@@ -658,12 +634,10 @@ fn opens_the_complete_reference_on_demand_and_preserves_lean_commands() {
             old_time
         );
         proxy.send([json!({"jsonrpc": "2.0", "id": open["id"], "result": {"success": true}})]);
-        assert!(
-            proxy
-                .receive_until(|r| r.iter().any(|m| m["id"] == 3))
-                .iter()
-                .any(|m| m["id"] == 3)
-        );
+        assert!(proxy
+            .receive_until(|r| r.iter().any(|m| m["id"] == 3))
+            .iter()
+            .any(|m| m["id"] == 3));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -683,7 +657,8 @@ fn view_commands_are_not_advertised_without_show_document_support() {
     ]);
     let received = proxy.receive_until(|r| (1..=3).all(|id| r.iter().any(|m| m["id"] == id)));
     assert_eq!(
-        received.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"]["executeCommandProvider"],
+        received.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"]
+            ["executeCommandProvider"],
         json!({"commands": ["lean.original"], "workDoneProgress": true})
     );
     for id in [2, 3] {
@@ -694,11 +669,9 @@ fn view_commands_are_not_advertised_without_show_document_support() {
                 .contains("window/showDocument")
         );
     }
-    assert!(
-        !received
-            .iter()
-            .any(|m| m["method"] == "window/showDocument")
-    );
+    assert!(!received
+        .iter()
+        .any(|m| m["method"] == "window/showDocument"));
     assert!(!dir.join("AbbreviationView.md").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -744,12 +717,10 @@ fn view_commands_report_open_failures_and_protocol_errors() {
         let completed = proxy.receive_until(|r| r.iter().any(|m| m["id"] == id));
         let response = completed.iter().find(|m| m["id"] == id).unwrap();
         assert_eq!(response["error"]["code"], -32803);
-        assert!(
-            response["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Cannot open")
-        );
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Cannot open"));
     }
     assert!(!dir.join("InfoView.opened").exists());
     let _ = std::fs::remove_dir_all(&dir);
@@ -773,12 +744,10 @@ fn reference_command_reports_write_failures_and_does_not_overwrite_the_infoview(
                 "capabilities": {"window": {"showDocument": {"support": true}}}
             }}),
         ]);
-        assert!(
-            proxy
-                .receive_until(|r| r.iter().any(|m| m["id"] == 1))
-                .iter()
-                .any(|m| m["id"] == 1)
-        );
+        assert!(proxy
+            .receive_until(|r| r.iter().any(|m| m["id"] == 1))
+            .iter()
+            .any(|m| m["id"] == 1));
         let infoview = std::fs::read(&goals).unwrap();
         if !collision {
             std::fs::create_dir(&path).unwrap();
@@ -787,17 +756,13 @@ fn reference_command_reports_write_failures_and_does_not_overwrite_the_infoview(
         let received = proxy.receive_until(|r| r.iter().any(|m| m["id"] == 2));
         let response = received.iter().find(|m| m["id"] == 2).unwrap();
         assert_eq!(response["error"]["code"], -32803);
-        assert!(
-            response["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Cannot write")
-        );
-        assert!(
-            !received
-                .iter()
-                .any(|m| m["method"] == "window/showDocument")
-        );
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Cannot write"));
+        assert!(!received
+            .iter()
+            .any(|m| m["method"] == "window/showDocument"));
         assert_eq!(std::fs::read(&goals).unwrap(), infoview);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -961,7 +926,8 @@ fn disabled_abbreviations_leave_completion_capabilities_and_requests_unchanged()
     ]);
     let received = proxy.receive_until(|r| (1..=2).all(|id| r.iter().any(|m| m["id"] == id)));
     assert_eq!(
-        received.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"]["completionProvider"],
+        received.iter().find(|m| m["id"] == 1).unwrap()["result"]["capabilities"]
+            ["completionProvider"],
         json!({
             "resolveProvider": true, "triggerCharacters": ["."]
         })

@@ -18,8 +18,14 @@ brackets = [
     { start = "⌊", end = "⌋", close = true, newline = false },
     { start = "⟦", end = "⟧", close = true, newline = true },
     { start = "‹", end = "›", close = true, newline = false },
-    { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
-    { start = "/-", end = "-/", close = true, newline = false, not_in = ["string", "comment"] },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = [
+        "string",
+        "comment",
+    ] },
+    { start = "/-", end = "-/", close = true, newline = false, not_in = [
+        "string",
+        "comment",
+    ] },
 ]
 word_characters = ["'", "!", "?"]
 tab_size = 2
@@ -29,5 +35,7 @@ tab_size = 2
 increase_indent_pattern = '''^(?:[^"/\r\n-]|-[^"/\r\n-]|/[^"\r\n-])*(?:(?:^|[^\w'!?.])(?:by|do|where|then|else)|:=|=>|↦|←|<-)[ \t]*(?:--[^\r\n]*)?$'''
 
 decrease_indent_patterns = [
-    { pattern = '^\s*else(?:[ \t]|$)', valid_after = ["if"] },
+    { pattern = '^\s*else(?:[ \t]|$)', valid_after = [
+        "if",
+    ] },
 ]
